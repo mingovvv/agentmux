@@ -1,0 +1,21 @@
+[Unit]
+Description=agentmux - AI agent CLI gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=youruser
+Group=youruser
+Environment=HOME=/home/youruser
+# Make sure node>=20 AND the agent CLIs (claude / codex / agy) are on PATH.
+# If you use nvm, point at that node bin dir explicitly, e.g.:
+#   /home/youruser/.nvm/versions/node/v20.x.y/bin:/usr/local/bin:/usr/bin:/bin:/snap/bin:/home/youruser/.local/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/opt/agentmux
+ExecStart=/usr/bin/node /opt/agentmux/server.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

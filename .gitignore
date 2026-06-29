@@ -1,0 +1,17 @@
+# secrets & host-specific (never commit)
+config.json
+INTERNAL.md
+
+# runtime data
+store/
+workspaces/
+*.log
+
+# deps / os
+node_modules/
+.DS_Store
+
+# editor swap files
+*.swp
+*.swo
+*~

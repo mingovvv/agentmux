@@ -1,0 +1,15 @@
+{
+  "name": "agentmux",
+  "version": "0.1.0",
+  "description": "One OpenAI-compatible API + web UI in front of multiple headless AI agent CLIs (Claude Code, Codex, Antigravity).",
+  "private": true,
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

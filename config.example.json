@@ -1,0 +1,39 @@
+{
+  "port": 8787,
+  "host": "127.0.0.1",
+  "maxConcurrentPerProvider": 3,
+  "authToken": "CHANGE_ME_TO_A_LONG_RANDOM_STRING",
+  "providers": {
+    "claude": {
+      "enabled": true,
+      "label": "Claude",
+      "models": [
+        { "id": "claude-opus-4-8",           "label": "Opus 4.8" },
+        { "id": "claude-sonnet-4-6",         "label": "Sonnet 4.6" },
+        { "id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5" }
+      ]
+    },
+    "codex": {
+      "enabled": true,
+      "label": "Codex",
+      "models": [
+        { "id": "gpt-5.5",      "label": "GPT-5.5" },
+        { "id": "gpt-5.4-mini", "label": "GPT-5.4 mini" }
+      ]
+    },
+    "antigravity": {
+      "enabled": true,
+      "label": "Antigravity",
+      "models": [
+        { "id": "Gemini 3.5 Flash (Medium)",   "label": "Gemini 3.5 Flash (Medium)" },
+        { "id": "Gemini 3.5 Flash (High)",      "label": "Gemini 3.5 Flash (High)" },
+        { "id": "Gemini 3.5 Flash (Low)",       "label": "Gemini 3.5 Flash (Low)" },
+        { "id": "Gemini 3.1 Pro (Low)",         "label": "Gemini 3.1 Pro (Low)" },
+        { "id": "Gemini 3.1 Pro (High)",        "label": "Gemini 3.1 Pro (High)" },
+        { "id": "Claude Sonnet 4.6 (Thinking)", "label": "Claude Sonnet 4.6 (Thinking)" },
+        { "id": "Claude Opus 4.6 (Thinking)",   "label": "Claude Opus 4.6 (Thinking)" },
+        { "id": "GPT-OSS 120B (Medium)",        "label": "GPT-OSS 120B (Medium)" }
+      ]
+    }
+  }
+}

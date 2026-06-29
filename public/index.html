@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Gateway</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#272b36;
+    --text:#e7e9ee; --muted:#8b909c; --accent:#6d8bff; --accent2:#9b7bff;
+    --user:#243049; --ok:#3ddc97; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    background:var(--bg);color:var(--text);display:flex;overflow:hidden}
+  /* sidebar */
+  aside{width:260px;background:var(--panel);border-right:1px solid var(--border);flex-shrink:0;overflow:hidden;transition:width .18s ease}
+  .sb-inner{width:260px;height:100%;display:flex;flex-direction:column}
+  body.sidebar-collapsed aside{width:0;border-right:0}
+  .brand{padding:16px 18px;font-weight:700;font-size:15px;letter-spacing:.3px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:8px}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2))}
+  .newbtn{margin:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel2);
+    color:var(--text);cursor:pointer;font-weight:600;transition:.15s}
+  .newbtn:hover{border-color:var(--accent);color:#fff}
+  .convs{flex:1;overflow-y:auto;padding:4px 8px}
+  .conv{padding:9px 11px;border-radius:8px;cursor:pointer;color:var(--muted);display:flex;gap:6px;align-items:center}
+  .conv:hover{background:var(--panel2);color:var(--text)}
+  .conv.active{background:var(--panel2);color:#fff}
+  .conv .ctitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .conv .x{flex:0 0 auto;opacity:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:12px;color:var(--muted)}
+  .conv:hover .x{opacity:.6}
+  .conv .x:hover{opacity:1;background:var(--border);color:#fff}
+  .cicon{flex:0 0 auto;width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center}
+  .cicon svg{width:11px;height:11px;fill:#fff}
+  .cicon.claude{background:#d97757}
+  .cicon.codex{background:#000}
+  .cicon.antigravity{background:linear-gradient(135deg,#4285f4,#9b72cb)}
+  .foot{padding:10px;border-top:1px solid var(--border)}
+  .foot-btn{width:100%;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:8px;font:inherit;font-size:12px;cursor:pointer;transition:.12s}
+  .foot-btn:hover{background:var(--panel2);color:var(--text);border-color:#3a4150}
+  /* main */
+  main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+  .hero{display:none}
+  main.welcome #chat{display:none}
+  main.welcome .composer{position:absolute;left:0;right:0;top:50%;transform:translateY(-54%);border-top:0;background:transparent;padding:0}
+  main.welcome .hero{display:block;text-align:center;font-size:28px;font-weight:650;color:var(--text);margin-bottom:24px;letter-spacing:-.2px}
+  header{height:54px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 18px;background:var(--panel)}
+  select,.tokenbtn{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font:inherit;cursor:pointer}
+  header .spacer{flex:1}
+  .iconbtn{background:transparent;border:0;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:6px 9px;border-radius:8px}
+  .iconbtn:hover{background:var(--panel2);color:var(--text)}
+  .htitle{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.3px}
+  /* themed scrollbars (replace ugly defaults) */
+  *{scrollbar-width:thin;scrollbar-color:#323845 transparent}
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-track{background:transparent}
+  *::-webkit-scrollbar-thumb{background:#323845;border-radius:8px;border:2px solid var(--bg)}
+  *::-webkit-scrollbar-thumb:hover{background:#414959}
+  #chat{flex:1;overflow-y:auto;padding:26px 0}
+  .wrap{max-width:780px;margin:0 auto;padding:0 22px}
+  .msg{display:flex;gap:13px;margin-bottom:22px;animation:fade .2s}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+  .avatar{width:30px;height:30px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+  .msg.user .avatar{background:var(--user)}
+  .msg.assistant .avatar{background:linear-gradient(135deg,var(--accent),var(--accent2))}
+  .msg.assistant .avatar.claude{background:#d97757}
+  .msg.assistant .avatar.codex{background:#000}
+  .msg.assistant .avatar.antigravity{background:linear-gradient(135deg,#4285f4,#9b72cb)}
+  .msg.assistant .avatar svg{width:16px;height:16px;fill:#fff}
+  .body{flex:1;min-width:0;padding-top:3px}
+  .role{font-size:12px;color:var(--muted);margin-bottom:3px}
+  .content{word-wrap:break-word}
+  .content>*:first-child{margin-top:0}
+  .content>*:last-child{margin-bottom:0}
+  .content p{margin:0 0 10px}
+  .content h1,.content h2,.content h3,.content h4{margin:18px 0 8px;line-height:1.3;font-weight:650}
+  .content h1{font-size:1.5em} .content h2{font-size:1.3em} .content h3{font-size:1.12em} .content h4{font-size:1em}
+  .content h1,.content h2{border-bottom:1px solid var(--border);padding-bottom:5px}
+  .content ul,.content ol{margin:0 0 10px;padding-left:24px}
+  .content li{margin:3px 0}
+  .content li>p{margin:0}
+  .content a{color:var(--accent);text-decoration:none}
+  .content a:hover{text-decoration:underline}
+  .content blockquote{margin:0 0 10px;padding:2px 14px;border-left:3px solid var(--accent);color:var(--muted)}
+  .content hr{border:0;border-top:1px solid var(--border);margin:16px 0}
+  .content table{border-collapse:collapse;margin:0 0 10px;display:block;overflow-x:auto}
+  .content th,.content td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+  .content th{background:var(--panel2)}
+  .content pre{background:#0b0d12;border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;margin:0 0 10px}
+  .content code{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .content pre code{border:0;padding:0;font-size:12.5px}
+  .tool{font-size:12px;color:var(--accent);margin:3px 0;font-family:ui-monospace,monospace}
+  .toolcall{border:1px solid var(--border);border-radius:8px;margin:2px 0 12px;overflow:hidden;background:#0b0d12}
+  .toolcall .thead{display:flex;align-items:center;gap:8px;padding:7px 11px;background:var(--panel2);font-size:12.5px}
+  .toolcall .tname{color:var(--accent);font-weight:600;font-family:ui-monospace,monospace}
+  .toolcall .tsub{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .toolcall .tcmd{margin:0;padding:9px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:#cfe3ff;white-space:pre-wrap;word-break:break-word;border-top:1px solid var(--border)}
+  .toolcall .tout{margin:0;padding:9px 11px;font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);white-space:pre-wrap;word-break:break-word;border-top:1px solid var(--border);max-height:240px;overflow:auto}
+  .toolcall .tout.err{color:var(--err)}
+  .err{color:var(--err)}
+  .cursor::after{content:'▋';animation:blink 1s steps(1) infinite;color:var(--accent)}
+  @keyframes blink{50%{opacity:0}}
+  /* "생각 중" 이퀄라이저 스피너 */
+  .thinking{display:inline-flex;align-items:flex-end;gap:3px;height:20px;padding:3px 0}
+  .thinking span{width:3.5px;height:6px;border-radius:2px;background:linear-gradient(180deg,var(--accent),var(--accent2));animation:eq 1s ease-in-out infinite}
+  .thinking span:nth-child(2){animation-delay:.12s}
+  .thinking span:nth-child(3){animation-delay:.24s}
+  .thinking span:nth-child(4){animation-delay:.36s}
+  .thinking span:nth-child(5){animation-delay:.48s}
+  @keyframes eq{0%,100%{height:5px;opacity:.45}50%{height:17px;opacity:1}}
+  .empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);gap:8px}
+  .empty h2{color:var(--text);font-weight:600;margin:0}
+  /* composer */
+  .composer{border-top:1px solid var(--border);padding:14px 0;background:var(--panel)}
+  .cwrap{max-width:780px;margin:0 auto;padding:0 22px}
+  .inputbox{display:flex;flex-direction:row;align-items:flex-end;gap:10px;background:var(--panel2);border:1px solid var(--border);border-radius:24px;padding:7px 8px 7px 18px;transition:border-color .15s}
+  .inputbox.tall{flex-direction:column;align-items:stretch;gap:6px;border-radius:22px;padding:10px 12px 10px 16px}
+  .inputbox:focus-within{border-color:var(--accent)}
+  .inputbox textarea{flex:1;min-width:0;width:100%;resize:none;background:transparent;color:var(--text);border:0;outline:none;
+    padding:9px 2px;font:inherit;line-height:1.5;max-height:340px;overflow-y:hidden}
+  .inputbox textarea::-webkit-scrollbar-thumb{border-color:var(--panel2)}
+  .inputbox.tall textarea{flex:0 0 auto}
+  .controls{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  .inputbox.tall .controls{width:100%;justify-content:space-between}
+  /* custom dropdown (Gemini-ish pill) */
+  .dd{position:relative}
+  .dd-btn{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--border);color:var(--text);
+    border-radius:999px;padding:7px 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;transition:.12s}
+  .dd-btn:hover{border-color:#3a4150;background:#222734}
+  .dd.open .dd-btn{border-color:var(--accent)}
+  .dd-btn .chev{color:var(--muted);font-size:9px;transition:transform .15s}
+  .dd.open .dd-btn .chev{transform:rotate(180deg)}
+  .dd-val{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  .dd-menu{position:absolute;bottom:calc(100% + 8px);left:0;min-width:200px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:14px;padding:5px;box-shadow:0 14px 36px rgba(0,0,0,.55);opacity:0;visibility:hidden;transform:translateY(6px);
+    transition:.14s;z-index:50;max-height:min(58vh,440px);overflow-y:auto}
+  .dd.open .dd-menu{opacity:1;visibility:visible;transform:translateY(0)}
+  .inputbox:not(.tall) .dd-menu{left:auto;right:0}
+  /* 새 대화(중앙)에선 버튼 아래로 펼침 */
+  main.welcome .dd-menu{top:calc(100% + 8px);bottom:auto;transform:translateY(-6px)}
+  main.welcome .dd.open .dd-menu{transform:translateY(0)}
+  .dd-lbl{padding:6px 11px 4px;font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted)}
+  .dd-item{padding:8px 11px;border-radius:9px;font-size:13px;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .dd-item:hover{background:var(--panel)}
+  .dd-item.sel{color:#fff}
+  .dd-item.sel::after{content:'✓';color:var(--accent);font-size:12px}
+  .dd-item.dis{color:#555;cursor:default}
+  .dd-item.dis:hover{background:transparent}
+  .dd-sep{margin:0 7px;color:var(--muted)}
+  .dd-div{height:1px;background:var(--border);margin:5px 4px}
+  .dd-item .muted{color:var(--muted);font-size:11px;margin-left:6px}
+  .send{width:38px;height:38px;border-radius:50%;border:0;background:var(--accent);color:#fff;cursor:pointer;font-size:17px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:.12s}
+  .send:hover{background:#5b7bff}
+  .send:disabled{opacity:.35;cursor:default}
+  .hint{margin:6px 0 0;font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<aside>
+  <div class="sb-inner">
+    <div class="brand"><span class="dot"></span> AI Gateway</div>
+    <button class="newbtn" onclick="newChat()">＋ 새 대화</button>
+    <div class="convs" id="convs"></div>
+    <div class="foot"><button class="foot-btn" onclick="setToken()">🔑 토큰 설정</button></div>
+  </div>
+</aside>
+<main class="welcome" id="main">
+  <header>
+    <button class="iconbtn" id="sidebarToggle" title="사이드바 열기/닫기">☰</button>
+    <div class="htitle" id="htitle">AI Gateway</div>
+    <div class="spacer"></div>
+  </header>
+  <div id="chat"><div class="empty"><h2>무엇을 도와드릴까요?</h2><div>모델을 선택하고 메시지를 입력하세요.</div></div></div>
+  <div class="composer">
+    <div class="cwrap">
+      <div class="hero" id="hero">무엇을 도와드릴까요?</div>
+      <div class="inputbox" id="inputbox">
+        <textarea id="input" rows="1" placeholder="메시지를 입력하세요…  (Enter 전송, Shift+Enter 줄바꿈)"></textarea>
+        <div class="controls">
+          <div class="dd" id="ddCombo"></div>
+          <button class="send" id="send" onclick="sendMsg()" title="전송">↑</button>
+        </div>
+      </div>
+      <div class="hint" id="hint"></div>
+    </div>
+  </div>
+</main>
+<script src="/marked.min.js"></script>
+<script src="/purify.min.js"></script>
+<script>
+const $ = (s)=>document.querySelector(s);
+let TOKEN = localStorage.getItem('gw_token') || '';
+let convId = null, busy = false, providers = [], curProvider = '', curModel = '';
+
+function setToken(){
+  const t = prompt('Gateway 토큰을 입력하세요:', TOKEN);
+  if(t!==null){ TOKEN=t.trim(); localStorage.setItem('gw_token',TOKEN); boot(); }
+}
+function H(o){ return {'Content-Type':'application/json','Authorization':'Bearer '+TOKEN}; }
+
+async function boot(){
+  try{
+    const r = await fetch('/api/providers',{headers:H()});
+    if(r.status===401){ if(!TOKEN) setToken(); return; }
+    const d = await r.json();
+    providers = d.providers;
+    const first = providers.find(p=>p.enabled) || providers[0];
+    curProvider = first ? first.id : '';
+    curModel = firstModelOf(curProvider);
+    buildCombo();
+    loadConvs();
+  }catch(e){ /* offline */ }
+}
+function firstModelOf(pid){ const p=providers.find(x=>x.id===pid); return (p && p.models && p.models.length) ? p.models[0].id : ''; }
+function buildCombo(){
+  const el=$('#ddCombo');
+  const p=providers.find(x=>x.id===curProvider)||{}; const ms=(p.models)||[];
+  const m=ms.find(x=>x.id===curModel)||{};
+  el.innerHTML = `<button class="dd-btn" type="button"><span class="cicon ${esc(curProvider)}">${providerIcon(curProvider)}</span><span class="dd-val">${esc(m.label||p.label||'—')}</span><span class="chev">▼</span></button>`
+    + `<div class="dd-menu">`
+    + `<div class="dd-lbl">에이전트</div>`
+    + providers.map(x=>`<div class="dd-item${x.id===curProvider?' sel':''}${x.enabled?'':' dis'}" data-kind="agent" data-v="${esc(x.id)}"><span style="display:flex;align-items:center;gap:8px"><span class="cicon ${esc(x.id)}">${providerIcon(x.id)}</span>${esc(x.label)}${x.enabled?'':' <span class="muted">준비중</span>'}</span></div>`).join('')
+    + `<div class="dd-div"></div>`
+    + `<div class="dd-lbl">모델</div>`
+    + ms.map(x=>`<div class="dd-item${x.id===curModel?' sel':''}" data-kind="model" data-v="${esc(x.id)}"><span>${esc(x.label)}</span></div>`).join('')
+    + `</div>`;
+  el.querySelector('.dd-btn').onclick=(e)=>{ e.stopPropagation(); const open=el.classList.contains('open'); closeAllDD(); if(!open) el.classList.add('open'); };
+  el.querySelectorAll('.dd-item').forEach(it=>{
+    if(it.classList.contains('dis')) return;
+    it.onclick=(e)=>{ e.stopPropagation();
+      const kind=it.getAttribute('data-kind'), v=it.getAttribute('data-v');
+      if(kind==='agent'){
+        if(v!==curProvider){ curProvider=v; curModel=firstModelOf(v); }
+        buildCombo(); $('#ddCombo').classList.add('open');   // 에이전트 고르면 모델 선택하도록 열어둠
+      } else {
+        curModel=v; buildCombo(); $('#ddCombo').classList.remove('open'); // 모델 선택 → 닫힘
+      }
+    };
+  });
+}
+function closeAllDD(){ document.querySelectorAll('.dd.open').forEach(d=>d.classList.remove('open')); }
+document.addEventListener('click',closeAllDD);
+
+async function loadConvs(){
+  const r = await fetch('/api/conversations',{headers:H()});
+  const d = await r.json();
+  const box=$('#convs'); box.innerHTML='';
+  for(const c of d.conversations){
+    const el=document.createElement('div');
+    el.className='conv'+(c.id===convId?' active':'');
+    el.innerHTML=`<span class="cicon ${esc(c.provider)}">${providerIcon(c.provider)}</span><span class="ctitle">${esc(c.title||'대화')}</span><span class="x" title="삭제">✕</span>`;
+    el.onclick=(e)=>{ if(e.target.classList.contains('x')){delConv(c.id);return;} openConv(c.id); };
+    box.appendChild(el);
+  }
+}
+async function delConv(id){
+  await fetch('/api/conversations/'+id,{method:'DELETE',headers:H()});
+  if(id===convId){ convId=null; renderEmpty(); }
+  loadConvs();
+}
+function newChat(){ convId=null; renderEmpty(); loadConvs(); $('#input').focus(); }
+function renderEmpty(){ $('#main').classList.add('welcome'); $('#chat').innerHTML='<div class="empty"><h2>무엇을 도와드릴까요?</h2></div>'; }
+
+async function openConv(id){
+  const r = await fetch('/api/conversations/'+id,{headers:H()});
+  const c = await r.json();
+  convId=id; curProvider=c.provider; curModel=firstModelOf(c.provider); buildCombo();
+  $('#main').classList.remove('welcome');
+  $('#chat').innerHTML='<div class="wrap" id="wrap"></div>';
+  for(const m of c.messages){ addMsg(m.role, m.content, c.provider); }
+  loadConvs(); scroll();
+}
+
+function esc(s){ return (s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+function providerIcon(id){
+  // 공식 브랜드 로고 (Simple Icons, 24x24 단일 경로). antigravity는 전용 아이콘 부재로 Google Gemini 마크 사용.
+  const g={
+    claude:'m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z',
+    codex:'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z',
+    antigravity:'M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81'
+  };
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${g[id]||g.claude}"/></svg>`;
+}
+marked.setOptions({ gfm:true, breaks:true });
+function md(s){ try{ return DOMPurify.sanitize(marked.parse(s||'')); }catch(e){ return esc(s); } }
+
+function toolSummary(name, input){
+  input=input||{};
+  if(name==='Bash') return {sub:input.description||'', body:input.command||''};
+  if(['Read','Edit','Write','NotebookEdit'].includes(name)) return {sub:'', body:input.file_path||input.notebook_path||JSON.stringify(input)};
+  if(name==='Grep') return {sub:input.path||'', body:input.pattern||''};
+  if(name==='Glob') return {sub:'', body:input.pattern||''};
+  if(name==='WebFetch') return {sub:'', body:input.url||''};
+  if(name==='WebSearch') return {sub:'', body:input.query||''};
+  if(name==='Task') return {sub:input.subagent_type||'', body:input.description||''};
+  const s=JSON.stringify(input); return {sub:'', body:s.length>240?s.slice(0,240)+'…':s};
+}
+function toolBlock(ev){
+  const {sub,body}=toolSummary(ev.name, ev.input);
+  const el=document.createElement('div'); el.className='toolcall';
+  el.innerHTML=`<div class="thead"><span class="tname">🔧 ${esc(ev.name)}</span>${sub?`<span class="tsub">${esc(sub)}</span>`:''}</div>`
+    +(body?`<pre class="tcmd">${esc(body)}</pre>`:'');
+  return el;
+}
+function attachResult(el, ev){
+  if(!el) return;
+  const pre=document.createElement('pre'); pre.className='tout'+(ev.isError?' err':'');
+  const t=ev.text||''; const max=2000;
+  pre.textContent = t.length>max ? t.slice(0,max)+'\n…('+(t.length-max)+' more chars)' : (t||'(no output)');
+  el.appendChild(pre);
+}
+function ensureWrap(){ let w=$('#wrap'); if(!w){ $('#chat').innerHTML='<div class="wrap" id="wrap"></div>'; w=$('#wrap'); } return w; }
+function addMsg(role, content, provider){
+  const w=ensureWrap();
+  const el=document.createElement('div'); el.className='msg '+role;
+  const pInfo = provider ? providers.find(x=>x.id===provider) : null;
+  const av = role==='user'
+    ? '<div class="avatar">나</div>'
+    : `<div class="avatar ${provider?esc(provider):''}">${provider?providerIcon(provider):'AI'}</div>`;
+  const label = role==='user' ? 'You' : (pInfo?esc(pInfo.label):'AI');
+  el.innerHTML=`${av}<div class="body"><div class="role">${label}</div><div class="content">${md(content)}</div></div>`;
+  w.appendChild(el); scroll(); return el.querySelector('.content');
+}
+function scroll(){ const c=$('#chat'); c.scrollTop=c.scrollHeight; }
+
+async function sendMsg(){
+  if(busy) return;
+  const ta=$('#input'); const text=ta.value.trim(); if(!text) return;
+  const provider=curProvider;
+  if(!provider){ alert('사용 가능한 에이전트가 없습니다'); return; }
+  ta.value=''; autosize();
+  $('#main').classList.remove('welcome');
+  addMsg('user', text);
+  // assistant 메시지 셸 — 순서가 있는 세그먼트(텍스트 블록 + 도구 호출)
+  const w=ensureWrap();
+  const msg=document.createElement('div'); msg.className='msg assistant';
+  const pInfo=providers.find(x=>x.id===curProvider); const mInfo=((pInfo&&pInfo.models)||[]).find(x=>x.id===curModel);
+  const roleLabel=(pInfo?pInfo.label:'AI')+(mInfo?(' · '+mInfo.label):'');
+  msg.innerHTML=`<div class="avatar ${esc(curProvider)}">${providerIcon(curProvider)}</div><div class="body"><div class="role">${esc(roleLabel)}</div><div class="segments"></div></div>`;
+  w.appendChild(msg); scroll();
+  const segs=msg.querySelector('.segments');
+  const toolEls={}; // tool_use id → element (결과 붙일 곳)
+  // "생각 중" 스피너 (첫 토큰 도착 전까지)
+  const thinking=document.createElement('div'); thinking.className='thinking';
+  thinking.innerHTML='<span></span><span></span><span></span><span></span><span></span>';
+  segs.appendChild(thinking);
+  function killThinking(){ if(thinking.parentNode) thinking.remove(); }
+  busy=true; $('#send').disabled=true;
+
+  // 세그먼트별 타자기: claude의 덩어리 출력을 부드럽게, 도구 전후 순서 유지
+  let curEl=null, curTarget='', curShown=0, ticking=false, streamDone=false, errMsg=null, resolveDrain;
+  const drained=new Promise(r=>resolveDrain=r);
+  function newSeg(){ curEl=document.createElement('div'); curEl.className='content cursor'; curTarget=''; curShown=0; segs.appendChild(curEl); }
+  function renderCur(){ if(curEl) curEl.innerHTML=md(curTarget.slice(0,curShown)); }
+  function snapCur(){ if(curEl){ curShown=curTarget.length; renderCur(); curEl.classList.remove('cursor'); curEl=null; } }
+  function tick(){
+    if(curEl && curShown<curTarget.length){
+      const remaining=curTarget.length-curShown;
+      const step=Math.max(1, Math.ceil(remaining/25)); // 뒤처질수록 빨리 따라잡기
+      curShown=Math.min(curTarget.length, curShown+step); renderCur(); scroll();
+      requestAnimationFrame(tick);
+    } else if(streamDone){ ticking=false; renderCur(); if(curEl) curEl.classList.remove('cursor'); resolveDrain(); }
+    else { ticking=false; }
+  }
+  function pump(){ if(!ticking){ ticking=true; requestAnimationFrame(tick); } }
+
+  try{
+    const r = await fetch('/api/chat',{method:'POST',headers:H(),
+      body:JSON.stringify({provider, model:curModel, conversationId:convId, message:text})});
+    const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
+    while(true){
+      const {value,done}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let i; while((i=buf.indexOf('\n\n'))>=0){
+        const chunk=buf.slice(0,i); buf=buf.slice(i+2);
+        const line=chunk.replace(/^data: /,'');
+        if(!line) continue;
+        let ev; try{ev=JSON.parse(line);}catch{continue;}
+        if(ev.type==='meta'){ if(!convId){convId=ev.conversationId; loadConvs();} }
+        else if(ev.type==='delta'){ killThinking(); if(!curEl) newSeg(); curTarget+=ev.text; pump(); }
+        else if(ev.type==='tool'){ killThinking(); snapCur(); segs.appendChild(toolEls[ev.id]=toolBlock(ev)); scroll(); }
+        else if(ev.type==='tool_result'){ attachResult(toolEls[ev.id], ev); scroll(); }
+        else if(ev.type==='error'){ killThinking(); errMsg=ev.message; }
+        else if(ev.type==='done'){ if(ev.cost) $('#hint').textContent='이번 응답 비용 $'+Number(ev.cost).toFixed(4); }
+      }
+    }
+    streamDone=true; pump();
+    if(!curEl || curShown>=curTarget.length){ renderCur(); if(curEl) curEl.classList.remove('cursor'); resolveDrain(); }
+    await drained;
+  }catch(e){ errMsg=String(e); snapCur(); }
+  killThinking();
+  if(errMsg){ const er=document.createElement('div'); er.className='err'; er.textContent='⚠ '+errMsg; segs.appendChild(er); }
+  busy=false; $('#send').disabled=false;
+}
+
+$('#sidebarToggle').addEventListener('click',()=> document.body.classList.toggle('sidebar-collapsed'));
+const ta=$('#input');
+function autosize(){ ta.style.height='auto'; const sh=ta.scrollHeight; ta.style.height=Math.min(sh,340)+'px'; ta.style.overflowY = sh>340 ? 'auto' : 'hidden'; $('#inputbox').classList.toggle('tall', sh>48); }
+ta.addEventListener('input',autosize);
+ta.addEventListener('keydown',(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+boot();
+</script>
+</body>
+</html>
