@@ -21,6 +21,7 @@ Antigravity** instead of OpenAI. "OpenAI-compatible" is only the wire format, no
 - 💬 **Multi-turn** conversations (per-provider session resume)
 - 🔧 **Tool transcripts** — shows the agent's tool calls & results
 - 🧩 **OpenAI-compatible API** (`/v1/chat/completions`, `/v1/models`)
+- 🗣 **Council mode** — all agents answer, debate each other, then one synthesizes a verdict
 - 🛡️ **Safe tool policy** — shell / file-write disabled, web / read / MCP allowed
 - 🚦 **Per-provider concurrency** limits (agents run independently)
 - 🪶 **Zero npm dependencies** — Node ≥ 20, plain `http`
@@ -75,6 +76,19 @@ POST /api/chat
 GET  /api/providers
 GET  /api/conversations   ·   GET /api/conversations/:id   ·   DELETE /api/conversations/:id
 ```
+
+### Council — multi-agent debate
+
+```
+POST /api/council
+{ "question": "...", "synthesizer"?: "claude" }
+  → SSE: round{round,label,agents} | delta{agent,round,text} | error | done
+```
+
+Every enabled agent answers independently, then critiques the others, then the
+**synthesizer** agent concludes. Since the agents are different model families
+(Anthropic / OpenAI / Google), the debate is genuinely diverse. ~7 model calls per
+question (slower / costlier). Also available as a web-UI toggle (🗣).
 
 ## Configuration
 

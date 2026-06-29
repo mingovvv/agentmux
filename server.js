@@ -86,36 +86,19 @@ function serveStatic(req, res) {
 }
 
 /* ----------------------------- chat core --------------------------- */
-async function runTurn({ provider, conversationId, message, model, onEvent, signal }) {
+// one agent run with concurrency gate + timeout (no store/session side effects)
+async function runAgent({ provider, sessionId, workdir, model, message, onEvent, signal }) {
   const adapter = adapters.get(provider);
   if (!adapter) throw new Error(`unknown or disabled provider: ${provider}`);
-
-  let conv = conversationId ? store.get(conversationId) : null;
-  if (!conv) conv = store.create(provider, message);
-  if (conv.provider !== provider) throw new Error('provider mismatch for this conversation');
-
-  store.addMessage(conv.id, 'user', message);
-  onEvent({ type: 'meta', conversationId: conv.id, provider });
-
-  await acquire(provider); // per-provider concurrency gate
-  // timeout: kill the child + free the slot if a run hangs
+  await acquire(provider);
   const ac = new AbortController();
   const fwd = () => ac.abort();
   if (signal) { if (signal.aborted) ac.abort(); else signal.addEventListener('abort', fwd); }
   const TMO = CONFIG.requestTimeoutMs || 300000;
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; ac.abort(); }, TMO);
-  const t0 = Date.now();
-  let result;
   try {
-    result = await adapter.run({
-      prompt: message,
-      sessionId: conv.sessionId,
-      workdir: conv.workdir,
-      model: model || undefined,
-      onEvent,
-      signal: ac.signal,
-    });
+    return await adapter.run({ prompt: message, sessionId, workdir, model: model || undefined, onEvent, signal: ac.signal });
   } catch (e) {
     throw timedOut ? new Error(`request timed out after ${Math.round(TMO / 1000)}s`) : e;
   } finally {
@@ -123,11 +106,57 @@ async function runTurn({ provider, conversationId, message, model, onEvent, sign
     if (signal) signal.removeEventListener('abort', fwd);
     release(provider);
   }
+}
+
+async function runTurn({ provider, conversationId, message, model, onEvent, signal }) {
+  let conv = conversationId ? store.get(conversationId) : null;
+  if (!conv) conv = store.create(provider, message);
+  if (conv.provider !== provider) throw new Error('provider mismatch for this conversation');
+
+  store.addMessage(conv.id, 'user', message);
+  onEvent({ type: 'meta', conversationId: conv.id, provider });
+
+  const t0 = Date.now();
+  const result = await runAgent({ provider, sessionId: conv.sessionId, workdir: conv.workdir, model, message, onEvent, signal });
   log(`${provider}${model ? '/' + model : ''} ${Date.now() - t0}ms${result.cost ? ' $' + result.cost.toFixed(4) : ''} conv=${conv.id.slice(0, 8)}`);
 
   if (result.sessionId) store.setSession(conv.id, result.sessionId);
   store.addMessage(conv.id, 'assistant', result.text || '');
   return { conversationId: conv.id, ...result };
+}
+
+// Council: every enabled agent answers → critiques the others → one synthesizes.
+async function council({ question, synthesizer, onEvent, signal }) {
+  const parts = providerList().filter((p) => p.enabled).map((p) => p.id);
+  if (!parts.length) throw new Error('no enabled providers');
+  const labelOf = (id) => (providerList().find((p) => p.id === id) || {}).label || id;
+  const syn = (synthesizer && adapters.get(synthesizer)) ? synthesizer : (parts.includes('claude') ? 'claude' : parts[0]);
+  const wd = store.workspaceFor('_council', 'shared');
+  const tag = (agent, round) => (ev) => { if (ev.type === 'delta') onEvent({ type: 'delta', agent, round, text: ev.text }); };
+  const ask = (provider, round, message) =>
+    runAgent({ provider, workdir: wd, message, onEvent: tag(provider, round), signal })
+      .then((r) => ({ agent: provider, text: r.text || '' }))
+      .catch((e) => { onEvent({ type: 'delta', agent: provider, round, text: `(오류: ${e.message})` }); return { agent: provider, text: '' }; });
+  const block = (arr) => arr.map((x) => `[${labelOf(x.agent)}]\n${x.text}`).join('\n\n');
+
+  // Round 1 — independent answers (parallel)
+  onEvent({ type: 'round', round: 1, label: '독립 답변', agents: parts });
+  const r1 = await Promise.all(parts.map((p) =>
+    ask(p, 1, `다음 질문에 당신의 의견으로 답하세요. 핵심 위주로 간결하게.\n\n[질문]\n${question}`)));
+
+  // Round 2 — rebut / refine after seeing the others
+  onEvent({ type: 'round', round: 2, label: '상호 반박·보완', agents: parts });
+  const r2 = await Promise.all(parts.map((p) => {
+    const others = r1.filter((x) => x.agent !== p).map((x) => `[${labelOf(x.agent)}]\n${x.text}`).join('\n\n');
+    const mine = (r1.find((x) => x.agent === p) || {}).text || '';
+    return ask(p, 2, `질문: ${question}\n\n[당신의 1차 답변]\n${mine}\n\n[다른 AI들의 답변]\n${others}\n\n다른 답변과 비교해 동의/반대할 점과 보완점을 밝히고, 필요하면 입장을 수정하세요. 토론하듯 간결하게.`);
+  }));
+
+  // Synthesis — designated agent
+  onEvent({ type: 'round', round: 3, label: `종합 (${labelOf(syn)})`, agents: [syn] });
+  await ask(syn, 3, `아래는 "${question}" 에 대한 여러 AI의 토론입니다.\n\n=== 1라운드 (독립 답변) ===\n${block(r1)}\n\n=== 2라운드 (반박·보완) ===\n${block(r2)}\n\n위 토론을 종합해 최종 결론을 내려주세요. 합의점과 쟁점을 짚고, 가장 타당한 결론을 제시하세요.`);
+
+  onEvent({ type: 'done' });
 }
 
 /* ------------------------------ routes ----------------------------- */
@@ -206,6 +235,22 @@ const server = http.createServer(async (req, res) => {
           signal: ac.signal,
         });
         sse(res, { type: 'done', conversationId: out.conversationId, cost: out.cost });
+      } catch (e) {
+        sse(res, { type: 'error', message: String(e.message || e) });
+      }
+      return res.end();
+    }
+
+    // --- council: multi-agent debate (answer → rebut → synthesize) ---
+    if (req.method === 'POST' && url === '/api/council') {
+      const body = await readBody(req);
+      const question = body.question || body.message;
+      if (!question) return send(res, 400, { error: 'question required' });
+      sseHead(res);
+      const ac = new AbortController();
+      req.on('close', () => ac.abort());
+      try {
+        await council({ question, synthesizer: body.synthesizer, onEvent: (ev) => sse(res, ev), signal: ac.signal });
       } catch (e) {
         sse(res, { type: 'error', message: String(e.message || e) });
       }

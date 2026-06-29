@@ -157,6 +157,19 @@
   .send.stopbtn{background:#d65b54}
   .send.stopbtn:hover{background:#e0655e}
   .stopnote{font-size:12px;color:var(--muted);margin-top:4px}
+  /* council mode */
+  .ctoggle{width:36px;height:36px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;font-size:15px;flex-shrink:0;transition:.12s}
+  .ctoggle:hover{border-color:#3a4150;color:var(--text)}
+  .ctoggle.on{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-color:transparent}
+  .council-av{background:linear-gradient(135deg,var(--accent),var(--accent2))!important;font-size:15px}
+  .cround{margin:0 0 14px}
+  .cround-hd{font-size:11.5px;color:var(--muted);margin:10px 0 8px;border-top:1px solid var(--border);padding-top:10px;letter-spacing:.3px}
+  .ccards{display:flex;flex-direction:column;gap:9px}
+  .ccard{border:1px solid var(--border);border-radius:10px;background:#0e1116;overflow:hidden}
+  .ccard-hd{display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--border);font-size:12.5px;font-weight:600;color:var(--text)}
+  .ccard .content{padding:10px 12px}
+  .ccard.synth{border-color:var(--accent)}
+  .ccard.synth .ccard-hd{color:var(--accent);background:rgba(109,139,255,.08)}
   .hint{margin:6px 0 0;font-size:11px;color:var(--muted)}
 </style>
 </head>
@@ -182,6 +195,7 @@
       <div class="inputbox" id="inputbox">
         <textarea id="input" rows="1" placeholder="메시지를 입력하세요…  (Enter 전송, Shift+Enter 줄바꿈)"></textarea>
         <div class="controls">
+          <button class="ctoggle" id="councilBtn" onclick="toggleCouncil()" title="원탁회의 — 3 AI가 토론">🗣</button>
           <div class="dd" id="ddCombo"></div>
           <button class="send" id="send" onclick="onSend()" title="전송">↑</button>
         </div>
@@ -195,9 +209,59 @@
 <script>
 const $ = (s)=>document.querySelector(s);
 let TOKEN = localStorage.getItem('gw_token') || '';
-let convId = null, busy = false, providers = [], curProvider = '', curModel = '', curCtrl = null;
-function onSend(){ if(busy) stopGen(); else sendMsg(); }
+let convId = null, busy = false, providers = [], curProvider = '', curModel = '', curCtrl = null, councilMode = false;
+function onSend(){ if(busy) stopGen(); else if(councilMode) sendCouncil(); else sendMsg(); }
 function stopGen(){ if(curCtrl) curCtrl.abort(); }
+function toggleCouncil(){
+  councilMode=!councilMode;
+  $('#councilBtn').classList.toggle('on',councilMode);
+  $('#ddCombo').style.opacity = councilMode?'.4':'1';
+  $('#ddCombo').style.pointerEvents = councilMode?'none':'auto';
+  $('#input').placeholder = councilMode ? '질문하면 3개 AI가 토론합니다…  (Enter 전송)' : '메시지를 입력하세요…  (Enter 전송, Shift+Enter 줄바꿈)';
+}
+async function sendCouncil(){
+  if(busy) return;
+  const ta=$('#input'); const text=ta.value.trim(); if(!text) return;
+  ta.value=''; autosize(); $('#main').classList.remove('welcome');
+  addMsg('user', text);
+  const w=ensureWrap();
+  const msg=document.createElement('div'); msg.className='msg assistant council';
+  msg.innerHTML=`<div class="avatar council-av">🗣</div><div class="body"><div class="role">원탁회의 · 토론</div><div class="council-body"></div></div>`;
+  w.appendChild(msg); scroll();
+  const cbody=msg.querySelector('.council-body'); const blocks={};
+  const agentLabel=(id)=>{ const p=providers.find(x=>x.id===id); return p?p.label:id; };
+  function addRound(ev){
+    const r=document.createElement('div'); r.className='cround';
+    r.innerHTML=`<div class="cround-hd">${ev.round}라운드 · ${esc(ev.label)}</div><div class="ccards"></div>`;
+    const cards=r.querySelector('.ccards');
+    for(const a of ev.agents){
+      const card=document.createElement('div'); card.className='ccard'+(ev.round===3?' synth':'');
+      card.innerHTML=`<div class="ccard-hd"><span class="cicon ${esc(a)}">${providerIcon(a)}</span>${esc(agentLabel(a))}</div><div class="content"></div>`;
+      cards.appendChild(card); blocks[ev.round+':'+a]=card.querySelector('.content');
+    }
+    cbody.appendChild(r); scroll();
+  }
+  let errMsg=null;
+  busy=true; curCtrl=new AbortController();
+  const sendBtn=$('#send'); sendBtn.classList.add('stopbtn'); sendBtn.textContent='■'; sendBtn.title='중지';
+  try{
+    const r=await fetch('/api/council',{method:'POST',headers:H(),signal:curCtrl.signal,body:JSON.stringify({question:text})});
+    const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
+    while(true){
+      const {value,done}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let i; while((i=buf.indexOf('\n\n'))>=0){
+        const chunk=buf.slice(0,i); buf=buf.slice(i+2); const line=chunk.replace(/^data: /,''); if(!line) continue;
+        let ev; try{ev=JSON.parse(line);}catch{continue;}
+        if(ev.type==='round') addRound(ev);
+        else if(ev.type==='delta'){ const el=blocks[ev.round+':'+ev.agent]; if(el){ el._acc=(el._acc||'')+ev.text; el.innerHTML=md(el._acc); scroll(); } }
+        else if(ev.type==='error') errMsg=ev.message;
+      }
+    }
+  }catch(e){ if(!(e.name==='AbortError'||(curCtrl&&curCtrl.signal.aborted))) errMsg=String(e); }
+  if(errMsg){ const er=document.createElement('div'); er.className='err'; er.textContent='⚠ '+errMsg; cbody.appendChild(er); }
+  busy=false; curCtrl=null; sendBtn.classList.remove('stopbtn'); sendBtn.textContent='↑'; sendBtn.title='전송';
+}
 
 function setToken(){
   const t = prompt('Gateway 토큰을 입력하세요:', TOKEN);
@@ -410,7 +474,7 @@ $('#sidebarToggle').addEventListener('click',()=> document.body.classList.toggle
 const ta=$('#input');
 function autosize(){ ta.style.height='auto'; const sh=ta.scrollHeight; ta.style.height=Math.min(sh,340)+'px'; ta.style.overflowY = sh>340 ? 'auto' : 'hidden'; $('#inputbox').classList.toggle('tall', sh>48); }
 ta.addEventListener('input',autosize);
-ta.addEventListener('keydown',(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+ta.addEventListener('keydown',(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); onSend(); } });
 boot();
 </script>
 </body>

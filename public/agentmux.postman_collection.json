@@ -191,6 +191,43 @@
           }
         }
       ]
+    },
+    {
+      "name": "Council (debate)",
+      "item": [
+        {
+          "name": "Council",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"탭 vs 스페이스, 뭐가 나아?\",\n  \"synthesizer\": \"claude\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/council",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "council"
+              ]
+            },
+            "description": "Multi-agent debate (SSE). Every enabled agent answers, rebuts the others, then the synthesizer concludes. Events: round{round,label,agents} | delta{agent,round,text} | error | done. ~7 calls/question."
+          }
+        }
+      ]
     }
   ]
 }
