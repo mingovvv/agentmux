@@ -1,8 +1,17 @@
 # agentmux
 
-> One OpenAI-compatible API + web UI in front of multiple headless AI agent CLIs.
+> Use Claude Code, Codex, and Antigravity through one self-hosted API and web UI.
 
-**agentmux** multiplexes several agentic CLIs — Claude Code, OpenAI Codex, Google Antigravity, … — behind a single self-hosted gateway. Pick the agent and model per request, stream responses, keep multi-turn conversations, and call everything through an OpenAI-compatible `/v1/chat/completions` endpoint or a clean web UI.
+**agentmux** puts multiple headless AI agent CLIs behind a single gateway. Pick any
+agent and model per request, stream the response, and keep multi-turn conversations —
+from a clean web UI or over HTTP.
+
+The HTTP API speaks the **OpenAI `/v1/chat/completions` format** (the de-facto standard),
+so any OpenAI-compatible client or SDK — `curl`, the `openai` libraries, LangChain,
+OpenWebUI, … — works unchanged. It just routes your request to **Claude / Codex /
+Antigravity** instead of OpenAI. "OpenAI-compatible" is only the wire format, not the model.
+
+**Contents:** [Features](#features) · [Quick start](#quick-start) · [API](#api) · [Configuration](#configuration) · [Tool policy & concurrency](#tool-policy--concurrency) · [Extending](#extending) · [Security](#security)
 
 ## Features
 
@@ -16,7 +25,9 @@
 - 🚦 **Per-provider concurrency** limits (agents run independently)
 - 🪶 **Zero npm dependencies** — Node ≥ 20, plain `http`
 
-## Requirements
+## Quick start
+
+**Requirements**
 
 - Node.js ≥ 20
 - The agent CLIs you want, **installed & authenticated for the user that runs agentmux**:
@@ -24,7 +35,7 @@
   - [OpenAI Codex](https://developers.openai.com/codex) — `codex`
   - [Google Antigravity](https://antigravity.google) — `agy`
 
-## Setup
+**Run**
 
 ```bash
 git clone <repo-url> agentmux && cd agentmux
@@ -33,15 +44,6 @@ node server.js                          # or run via systemd (see deploy/agentmu
 ```
 
 Open the web UI at `http://<host>:<port>`, click 🔑, paste your token (stored in the browser).
-
-## Configuration — `config.json`
-
-| key | meaning |
-|---|---|
-| `port` / `host` | bind address. Use `127.0.0.1` or a **VPN IP** (e.g. Tailscale); do **not** expose publicly without a reverse proxy + real auth |
-| `authToken` | bearer token required by every API call |
-| `maxConcurrentPerProvider` | concurrent agent runs per provider (default `3`) |
-| `providers.<id>` | `{ enabled, label, models: [{ id, label }] }` |
 
 ## API
 
@@ -71,21 +73,20 @@ GET  /api/providers
 GET  /api/conversations   ·   GET /api/conversations/:id   ·   DELETE /api/conversations/:id
 ```
 
-## Adding a provider
+## Configuration
 
-1. Create `adapters/<id>.js` exporting:
-   ```js
-   module.exports = { id, label, run({ prompt, sessionId, workdir, model, onEvent, signal }) }
-   ```
-   `run` streams normalized events through `onEvent` (`{type:'delta'|'tool'|'tool_result'|'error', ...}`)
-   and resolves `{ sessionId, text, cost }`.
-2. Register it in `adapters/index.js`.
-3. Add it under `providers` in `config.json` with `enabled: true`.
-4. Restart.
+`config.json` (copy from `config.example.json`):
 
-## Tool policy
+| key | meaning |
+|---|---|
+| `port` / `host` | bind address. Use `127.0.0.1` or a **VPN IP** (e.g. Tailscale); do **not** expose publicly without a reverse proxy + real auth |
+| `authToken` | bearer token required by every API call |
+| `maxConcurrentPerProvider` | concurrent agent runs per provider (default `3`) |
+| `providers.<id>` | `{ enabled, label, models: [{ id, label }] }` |
 
-Shell execution and file writes are disabled; web, file-read, and MCP tools are allowed.
+## Tool policy & concurrency
+
+**Tools** — shell execution and file writes are disabled; web, file-read, and MCP tools are allowed:
 
 | provider | how |
 |---|---|
@@ -93,7 +94,11 @@ Shell execution and file writes are disabled; web, file-read, and MCP tools are 
 | codex | `-c sandbox_mode="read-only"` |
 | antigravity | `--sandbox` (+ workspace-only access) |
 
-## Architecture
+**Concurrency** — each provider has an independent limit (`maxConcurrentPerProvider`, default 3); agents don't block each other, and requests over the limit queue within that provider.
+
+## Extending
+
+**Layout**
 
 ```
 server.js          HTTP server — auth, routing, SSE, OpenAI-compat, concurrency gate
@@ -108,7 +113,19 @@ workspaces/<provider>/<conversationId>/   per-conversation working dir
 config.json        local config (gitignored — copy from config.example.json)
 ```
 
-## Security notes
+**Add a provider**
+
+1. Create `adapters/<id>.js` exporting:
+   ```js
+   module.exports = { id, label, run({ prompt, sessionId, workdir, model, onEvent, signal }) }
+   ```
+   `run` streams normalized events through `onEvent` (`{type:'delta'|'tool'|'tool_result'|'error', ...}`)
+   and resolves `{ sessionId, text, cost }`.
+2. Register it in `adapters/index.js`.
+3. Add it under `providers` in `config.json` with `enabled: true`.
+4. Restart.
+
+## Security
 
 - Single shared bearer token — intended for **personal / trusted use** over a VPN or localhost, not the public internet.
 - Agents run with the host user's permissions (minus shell/write). Don't expose to untrusted callers.
