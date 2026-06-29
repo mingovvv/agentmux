@@ -73,7 +73,7 @@ function sseHead(res) {
 function sse(res, obj) { res.write(`data: ${JSON.stringify(obj)}\n\n`); }
 
 /* --------------------------- static files -------------------------- */
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8' };
 function serveStatic(req, res) {
   let p = req.url.split('?')[0];
   if (p === '/') p = '/index.html';

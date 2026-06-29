@@ -1,0 +1,196 @@
+{
+  "info": {
+    "name": "agentmux",
+    "description": "agentmux — one API in front of Claude Code / Codex / Antigravity.\n\n1) Set collection variables: baseUrl, token.\n2) Auth is preset to Bearer {{token}} for every request.\n\nmodel: \"<provider>\" or \"<provider>/<modelId>\". See GET /v1/models.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://100.106.193.121:8787"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_TOKEN_HERE"
+    }
+  ],
+  "item": [
+    {
+      "name": "OpenAI-compatible",
+      "item": [
+        {
+          "name": "List models",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/models",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "models"
+              ]
+            },
+            "description": "Lists provider and provider/modelId combos."
+          }
+        },
+        {
+          "name": "Chat completions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"claude/claude-opus-4-8\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"한 문장으로 자기소개해줘\"\n    }\n  ],\n  \"stream\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "OpenAI format. model: provider or provider/modelId. stream:true → SSE. Multi-turn: set header X-Conversation-Id from a prior response's conversation_id."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Native",
+      "item": [
+        {
+          "name": "Chat (stream:false → JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"claude\",\n  \"model\": \"claude-opus-4-8\",\n  \"message\": \"한 문장으로 자기소개해줘\",\n  \"conversationId\": null,\n  \"stream\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chat"
+              ]
+            },
+            "description": "Native. stream:false → single JSON {conversationId, text, tools[], cost}. stream:true → SSE. Multi-turn: pass conversationId."
+          }
+        },
+        {
+          "name": "Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "providers"
+              ]
+            },
+            "description": "Agents/models and enabled state."
+          }
+        },
+        {
+          "name": "Conversations (list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/conversations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversations"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Conversation (detail)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/conversations/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                ":id"
+              ]
+            },
+            "description": "Messages of one conversation."
+          }
+        },
+        {
+          "name": "Conversation (delete)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/conversations/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                ":id"
+              ]
+            },
+            "description": "Removes the gateway record only."
+          }
+        }
+      ]
+    }
+  ]
+}
