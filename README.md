@@ -88,7 +88,9 @@ POST /api/council
 Every enabled agent answers independently, then critiques the others, then the
 **synthesizer** agent concludes. Since the agents are different model families
 (Anthropic / OpenAI / Google), the debate is genuinely diverse. ~7 model calls per
-question (slower / costlier). Also available as a web-UI toggle (🗣).
+question (slower / costlier). In the web UI it's a first-class mode (sidebar **🗣 토론**
+or the 🗣 toggle) rendered as a 3-lane "arena": a participant bar, a round stepper, each
+agent in its own column, and a highlighted synthesis panel.
 
 ## Configuration
 

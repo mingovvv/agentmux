@@ -21,9 +21,12 @@
   .brand{padding:16px 18px;font-weight:700;font-size:15px;letter-spacing:.3px;border-bottom:1px solid var(--border);
     display:flex;align-items:center;gap:8px}
   .brand .dot{width:9px;height:9px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2))}
-  .newbtn{margin:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel2);
-    color:var(--text);cursor:pointer;font-weight:600;transition:.15s}
+  .newrow{display:flex;gap:8px;margin:12px}
+  .newbtn{flex:1;padding:10px 8px;border:1px solid var(--border);border-radius:10px;background:var(--panel2);
+    color:var(--text);cursor:pointer;font-weight:600;transition:.15s;font-size:13px}
   .newbtn:hover{border-color:var(--accent);color:#fff}
+  .newbtn.council{background:linear-gradient(135deg,rgba(109,139,255,.16),rgba(155,123,255,.16));border-color:#3a3f6b}
+  .newbtn.council:hover{border-color:var(--accent)}
   .convs{flex:1;overflow-y:auto;padding:4px 8px}
   .conv{padding:9px 11px;border-radius:8px;cursor:pointer;color:var(--muted);display:flex;gap:6px;align-items:center}
   .conv:hover{background:var(--panel2);color:var(--text)}
@@ -170,6 +173,34 @@
   .ccard .content{padding:10px 12px}
   .ccard.synth{border-color:var(--accent)}
   .ccard.synth .ccard-hd{color:var(--accent);background:rgba(109,139,255,.08)}
+  /* council "arena" (stage) */
+  .arena-msg{display:block}
+  .arena{border:1px solid var(--border);border-radius:16px;padding:14px;position:relative;overflow:hidden;
+    background:radial-gradient(130% 90% at 50% -20%, rgba(109,139,255,.12), transparent 60%), #0b0d12}
+  .arena-cast{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .cast{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding:4px 10px;border:1px solid var(--border);border-radius:999px;transition:.2s}
+  .cast.speaking{color:#fff;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 16px rgba(109,139,255,.55);animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{50%{box-shadow:0 0 0 1px var(--accent),0 0 6px rgba(109,139,255,.3)}}
+  .arena-step{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-bottom:13px;padding-bottom:11px;border-bottom:1px solid var(--border)}
+  .step{opacity:.45;transition:.2s}
+  .step.done{opacity:.8}
+  .step.active{opacity:1;color:var(--accent);font-weight:700}
+  .arena-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  .lane{border:1px solid var(--border);border-radius:11px;background:#0e1117;overflow:hidden;transition:.2s}
+  .lane.speaking{border-color:var(--accent);box-shadow:0 0 16px rgba(109,139,255,.22)}
+  .lane-hd{display:flex;align-items:center;gap:7px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600}
+  .lane-body{padding:2px 10px 9px}
+  .lr-label{font-size:10px;color:var(--muted);margin:9px 0 2px;letter-spacing:.4px;text-transform:uppercase}
+  .lane-round .content{font-size:13px}
+  .arena-synth{margin-top:14px}
+  .synth-panel{border:1px solid var(--accent);border-radius:13px;overflow:hidden;animation:fade .3s;
+    background:linear-gradient(180deg,rgba(109,139,255,.12),rgba(155,123,255,.04))}
+  .synth-hd{display:flex;align-items:center;gap:8px;padding:10px 13px;border-bottom:1px solid var(--border);color:var(--accent);font-weight:700;font-size:13.5px}
+  .synth-panel .content{padding:12px 14px}
+  .cast .cicon,.lane-hd .cicon{width:16px;height:16px}
+  /* council welcome */
+  .hero-sub{display:block;font-size:13px;font-weight:400;color:var(--muted);margin-top:10px}
+  main.council-welcome .inputbox{border-color:#3a3f6b;box-shadow:0 0 26px rgba(109,139,255,.16)}
   .hint{margin:6px 0 0;font-size:11px;color:var(--muted)}
 </style>
 </head>
@@ -177,7 +208,10 @@
 <aside>
   <div class="sb-inner">
     <div class="brand"><span class="dot"></span> AI Gateway</div>
-    <button class="newbtn" onclick="newChat()">＋ 새 대화</button>
+    <div class="newrow">
+      <button class="newbtn" onclick="newChat()">＋ 일반</button>
+      <button class="newbtn council" onclick="newCouncil()">🗣 토론</button>
+    </div>
     <div class="convs" id="convs"></div>
     <div class="foot"><button class="foot-btn" onclick="setToken()">🔑 토큰 설정</button></div>
   </div>
@@ -212,43 +246,59 @@ let TOKEN = localStorage.getItem('gw_token') || '';
 let convId = null, busy = false, providers = [], curProvider = '', curModel = '', curCtrl = null, councilMode = false;
 function onSend(){ if(busy) stopGen(); else if(councilMode) sendCouncil(); else sendMsg(); }
 function stopGen(){ if(curCtrl) curCtrl.abort(); }
-function toggleCouncil(){
-  councilMode=!councilMode;
+function reflectCouncilUI(){
   $('#councilBtn').classList.toggle('on',councilMode);
   $('#ddCombo').style.opacity = councilMode?'.4':'1';
   $('#ddCombo').style.pointerEvents = councilMode?'none':'auto';
   $('#input').placeholder = councilMode ? '질문하면 3개 AI가 토론합니다…  (Enter 전송)' : '메시지를 입력하세요…  (Enter 전송, Shift+Enter 줄바꿈)';
 }
+function toggleCouncil(){ councilMode=!councilMode; reflectCouncilUI(); if($('#main').classList.contains('welcome')) renderEmpty(); }
+function newCouncil(){ convId=null; councilMode=true; reflectCouncilUI(); renderEmpty(); loadConvs(); $('#input').focus(); }
 async function sendCouncil(){
   if(busy) return;
   const ta=$('#input'); const text=ta.value.trim(); if(!text) return;
   ta.value=''; autosize(); $('#main').classList.remove('welcome');
   addMsg('user', text);
   const w=ensureWrap();
-  const msg=document.createElement('div'); msg.className='msg assistant council';
-  msg.innerHTML=`<div class="avatar council-av">🗣</div><div class="body"><div class="role">원탁회의 · 토론</div><div class="council-body"></div></div>`;
+  const msg=document.createElement('div'); msg.className='msg assistant arena-msg';
+  msg.innerHTML=`<div class="arena">
+      <div class="arena-cast"></div>
+      <div class="arena-step"><span class="step" data-r="1">① 독립답변</span><span class="step" data-r="2">② 반박·보완</span><span class="step" data-r="3">③ 종합</span></div>
+      <div class="arena-grid"></div>
+      <div class="arena-synth"></div>
+    </div>`;
   w.appendChild(msg); scroll();
-  const cbody=msg.querySelector('.council-body'); const blocks={};
-  // per-card typewriter (same smoothing as normal chat; multiple cards drain in one loop)
-  let ticking=false;
-  function tick(){
-    let active=false;
-    for(const k in blocks){ const b=blocks[k];
-      if(b.shown<b.target.length){ const rem=b.target.length-b.shown; b.shown=Math.min(b.target.length, b.shown+Math.max(1,Math.ceil(rem/25))); b.el.innerHTML=md(b.target.slice(0,b.shown)); active=true; } }
-    if(active){ scroll(); requestAnimationFrame(tick); } else { ticking=false; }
-  }
-  function pump(){ if(!ticking){ ticking=true; requestAnimationFrame(tick); } }
+  const arena=msg.querySelector('.arena'), castBar=arena.querySelector('.arena-cast'), grid=arena.querySelector('.arena-grid'), synthWrap=arena.querySelector('.arena-synth');
+  const blocks={}, lanes={};
   const agentLabel=(id)=>{ const p=providers.find(x=>x.id===id); return p?p.label:id; };
-  function addRound(ev){
-    const r=document.createElement('div'); r.className='cround';
-    r.innerHTML=`<div class="cround-hd">${ev.round}라운드 · ${esc(ev.label)}</div><div class="ccards"></div>`;
-    const cards=r.querySelector('.ccards');
-    for(const a of ev.agents){
-      const card=document.createElement('div'); card.className='ccard'+(ev.round===3?' synth':'');
-      card.innerHTML=`<div class="ccard-hd"><span class="cicon ${esc(a)}">${providerIcon(a)}</span>${esc(agentLabel(a))}</div><div class="content"></div>`;
-      cards.appendChild(card); blocks[ev.round+':'+a]={el:card.querySelector('.content'), target:'', shown:0};
+  let ticking=false;
+  function tick(){ let active=false; for(const k in blocks){ const b=blocks[k]; if(b.shown<b.target.length){ const rem=b.target.length-b.shown; b.shown=Math.min(b.target.length,b.shown+Math.max(1,Math.ceil(rem/25))); b.el.innerHTML=md(b.target.slice(0,b.shown)); active=true; } } if(active){ scroll(); requestAnimationFrame(tick);} else ticking=false; }
+  function pump(){ if(!ticking){ ticking=true; requestAnimationFrame(tick);} }
+  function buildStage(agents){
+    if(castBar.childElementCount) return;
+    for(const a of agents){ const c=document.createElement('span'); c.className='cast'; c.dataset.a=a; c.innerHTML=`<span class="cicon ${esc(a)}">${providerIcon(a)}</span>${esc(agentLabel(a))}`; castBar.appendChild(c); }
+    for(const a of agents){ const lane=document.createElement('div'); lane.className='lane'; lane.dataset.a=a; lane.innerHTML=`<div class="lane-hd"><span class="cicon ${esc(a)}">${providerIcon(a)}</span>${esc(agentLabel(a))}</div><div class="lane-body"></div>`; grid.appendChild(lane); lanes[a]=lane.querySelector('.lane-body'); }
+  }
+  function speaking(agents){
+    castBar.querySelectorAll('.cast').forEach(c=>c.classList.toggle('speaking', agents.includes(c.dataset.a)));
+    grid.querySelectorAll('.lane').forEach(l=>l.classList.toggle('speaking', agents.includes(l.dataset.a)));
+  }
+  function stepTo(round){ arena.querySelectorAll('.step').forEach(s=>{ const r=+s.dataset.r; s.classList.toggle('active', r===round); s.classList.toggle('done', r<round); }); }
+  function onRound(ev){
+    stepTo(ev.round); speaking(ev.agents);
+    if(ev.round===1) buildStage(ev.agents);
+    if(ev.round<=2){
+      for(const a of ev.agents){ const lb=lanes[a]; if(!lb) continue;
+        const rd=document.createElement('div'); rd.className='lane-round';
+        rd.innerHTML=`<div class="lr-label">${ev.round}R · ${esc(ev.label)}</div><div class="content"></div>`;
+        lb.appendChild(rd); blocks[ev.round+':'+a]={el:rd.querySelector('.content'),target:'',shown:0};
+      }
+    } else {
+      const a=ev.agents[0]; const panel=document.createElement('div'); panel.className='synth-panel';
+      panel.innerHTML=`<div class="synth-hd">🏆 종합 · ${esc(agentLabel(a))}</div><div class="content"></div>`;
+      synthWrap.appendChild(panel); blocks['3:'+a]={el:panel.querySelector('.content'),target:'',shown:0};
     }
-    cbody.appendChild(r); scroll();
+    scroll();
   }
   let errMsg=null;
   busy=true; curCtrl=new AbortController();
@@ -256,19 +306,19 @@ async function sendCouncil(){
   try{
     const r=await fetch('/api/council',{method:'POST',headers:H(),signal:curCtrl.signal,body:JSON.stringify({question:text})});
     const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
-    while(true){
-      const {value,done}=await reader.read(); if(done) break;
+    while(true){ const {value,done}=await reader.read(); if(done) break;
       buf+=dec.decode(value,{stream:true});
-      let i; while((i=buf.indexOf('\n\n'))>=0){
-        const chunk=buf.slice(0,i); buf=buf.slice(i+2); const line=chunk.replace(/^data: /,''); if(!line) continue;
+      let i; while((i=buf.indexOf('\n\n'))>=0){ const chunk=buf.slice(0,i); buf=buf.slice(i+2); const line=chunk.replace(/^data: /,''); if(!line) continue;
         let ev; try{ev=JSON.parse(line);}catch{continue;}
-        if(ev.type==='round') addRound(ev);
+        if(ev.type==='round') onRound(ev);
         else if(ev.type==='delta'){ const b=blocks[ev.round+':'+ev.agent]; if(b){ b.target+=ev.text; pump(); } }
         else if(ev.type==='error') errMsg=ev.message;
+        else if(ev.type==='done'){ speaking([]); stepTo(4); }
       }
     }
   }catch(e){ if(!(e.name==='AbortError'||(curCtrl&&curCtrl.signal.aborted))) errMsg=String(e); }
-  if(errMsg){ const er=document.createElement('div'); er.className='err'; er.textContent='⚠ '+errMsg; cbody.appendChild(er); }
+  speaking([]);
+  if(errMsg){ const er=document.createElement('div'); er.className='err'; er.textContent='⚠ '+errMsg; synthWrap.appendChild(er); }
   busy=false; curCtrl=null; sendBtn.classList.remove('stopbtn'); sendBtn.textContent='↑'; sendBtn.title='전송';
 }
 
@@ -338,8 +388,15 @@ async function delConv(id){
   if(id===convId){ convId=null; renderEmpty(); }
   loadConvs();
 }
-function newChat(){ convId=null; renderEmpty(); loadConvs(); $('#input').focus(); }
-function renderEmpty(){ $('#main').classList.add('welcome'); $('#chat').innerHTML='<div class="empty"><h2>무엇을 도와드릴까요?</h2></div>'; }
+function newChat(){ convId=null; councilMode=false; reflectCouncilUI(); renderEmpty(); loadConvs(); $('#input').focus(); }
+function renderEmpty(){
+  $('#main').classList.add('welcome');
+  $('#main').classList.toggle('council-welcome', councilMode);
+  $('#hero').innerHTML = councilMode
+    ? '🗣 원탁회의<span class="hero-sub">질문하면 3개 AI가 각자 답하고, 서로 반박한 뒤 결론을 냅니다</span>'
+    : '무엇을 도와드릴까요?';
+  $('#chat').innerHTML='<div class="empty"></div>';
+}
 
 async function openConv(id){
   const r = await fetch('/api/conversations/'+id,{headers:H()});
