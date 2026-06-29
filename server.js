@@ -147,13 +147,33 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
-    // --- streaming chat (used by web UI) ---
+    // --- native chat: SSE by default, single JSON when stream:false ---
     if (req.method === 'POST' && url === '/api/chat') {
       const body = await readBody(req);
       if (!body.provider || !body.message) return send(res, 400, { error: 'provider and message required' });
-      sseHead(res);
       const ac = new AbortController();
       req.on('close', () => ac.abort());
+
+      // non-streaming: collect events, return one JSON (text + tool transcript)
+      if (body.stream === false) {
+        const tools = [];
+        try {
+          const out = await runTurn({
+            provider: body.provider, conversationId: body.conversationId, message: body.message, model: body.model,
+            signal: ac.signal,
+            onEvent: (ev) => {
+              if (ev.type === 'tool') tools.push({ id: ev.id, name: ev.name, input: ev.input });
+              else if (ev.type === 'tool_result') { const t = tools.find((x) => x.id === ev.id); if (t) { t.result = ev.text; t.isError = ev.isError; } }
+            },
+          });
+          return send(res, 200, { conversationId: out.conversationId, provider: body.provider, text: out.text, tools, cost: out.cost });
+        } catch (e) {
+          return send(res, 500, { error: String(e.message || e) });
+        }
+      }
+
+      // streaming (default; used by web UI)
+      sseHead(res);
       try {
         const out = await runTurn({
           provider: body.provider,

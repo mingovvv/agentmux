@@ -68,7 +68,10 @@ curl -N http://<host>:<port>/v1/chat/completions \
 ### Native
 
 ```
-POST /api/chat   { "provider", "model", "conversationId"?, "message" }   → SSE: meta|delta|tool|tool_result|error|done
+POST /api/chat
+{ "provider", "model"?, "conversationId"?, "message", "stream"?: true }
+  • stream:true (default) → SSE events: meta | delta | tool | tool_result | error | done
+  • stream:false          → single JSON: { conversationId, provider, text, tools[], cost }
 GET  /api/providers
 GET  /api/conversations   ·   GET /api/conversations/:id   ·   DELETE /api/conversations/:id
 ```
