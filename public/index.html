@@ -175,6 +175,7 @@
   .ccard.synth .ccard-hd{color:var(--accent);background:rgba(109,139,255,.08)}
   /* council "arena" (stage) */
   .arena-msg{display:block}
+  .wrap:has(.arena-msg){max-width:1180px}   /* 토론 모드: 화면을 넓게 사용 */
   .arena{border:1px solid var(--border);border-radius:16px;padding:14px;position:relative;overflow:hidden;
     background:radial-gradient(130% 90% at 50% -20%, rgba(109,139,255,.12), transparent 60%), #0b0d12}
   .arena-cast{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
@@ -229,7 +230,7 @@
       <div class="inputbox" id="inputbox">
         <textarea id="input" rows="1" placeholder="메시지를 입력하세요…  (Enter 전송, Shift+Enter 줄바꿈)"></textarea>
         <div class="controls">
-          <button class="ctoggle" id="councilBtn" onclick="toggleCouncil()" title="원탁회의 — 3 AI가 토론">🗣</button>
+          <button class="ctoggle" id="councilBtn" onclick="toggleCouncil()" title="토론 모드 — 3 AI가 토론">🗣</button>
           <div class="dd" id="ddCombo"></div>
           <button class="send" id="send" onclick="onSend()" title="전송">↑</button>
         </div>
@@ -393,7 +394,7 @@ function renderEmpty(){
   $('#main').classList.add('welcome');
   $('#main').classList.toggle('council-welcome', councilMode);
   $('#hero').innerHTML = councilMode
-    ? '🗣 원탁회의<span class="hero-sub">질문하면 3개 AI가 각자 답하고, 서로 반박한 뒤 결론을 냅니다</span>'
+    ? '🗣 토론 모드<span class="hero-sub">질문하면 3개 AI가 각자 답하고, 서로 반박한 뒤 결론을 냅니다</span>'
     : '무엇을 도와드릴까요?';
   $('#chat').innerHTML='<div class="empty"></div>';
 }
