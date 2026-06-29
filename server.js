@@ -18,6 +18,8 @@ function send(res, code, body, headers = {}) {
   res.end(data);
 }
 
+function log(msg) { console.log(`[${new Date().toISOString()}] ${msg}`); }
+
 function authed(req) {
   const h = req.headers['authorization'] || '';
   const m = h.match(/^Bearer\s+(.+)$/i);
@@ -96,6 +98,14 @@ async function runTurn({ provider, conversationId, message, model, onEvent, sign
   onEvent({ type: 'meta', conversationId: conv.id, provider });
 
   await acquire(provider); // per-provider concurrency gate
+  // timeout: kill the child + free the slot if a run hangs
+  const ac = new AbortController();
+  const fwd = () => ac.abort();
+  if (signal) { if (signal.aborted) ac.abort(); else signal.addEventListener('abort', fwd); }
+  const TMO = CONFIG.requestTimeoutMs || 300000;
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ac.abort(); }, TMO);
+  const t0 = Date.now();
   let result;
   try {
     result = await adapter.run({
@@ -104,11 +114,16 @@ async function runTurn({ provider, conversationId, message, model, onEvent, sign
       workdir: conv.workdir,
       model: model || undefined,
       onEvent,
-      signal,
+      signal: ac.signal,
     });
+  } catch (e) {
+    throw timedOut ? new Error(`request timed out after ${Math.round(TMO / 1000)}s`) : e;
   } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', fwd);
     release(provider);
   }
+  log(`${provider}${model ? '/' + model : ''} ${Date.now() - t0}ms${result.cost ? ' $' + result.cost.toFixed(4) : ''} conv=${conv.id.slice(0, 8)}`);
 
   if (result.sessionId) store.setSession(conv.id, result.sessionId);
   store.addMessage(conv.id, 'assistant', result.text || '');
@@ -118,6 +133,13 @@ async function runTurn({ provider, conversationId, message, model, onEvent, sign
 /* ------------------------------ routes ----------------------------- */
 const server = http.createServer(async (req, res) => {
   const url = req.url.split('?')[0];
+  const t = Date.now();
+  res.on('finish', () => { if (url.startsWith('/api') || url.startsWith('/v1')) log(`${req.method} ${url} ${res.statusCode} ${Date.now() - t}ms`); });
+
+  // health check (no auth) — for monitoring / uptime probes
+  if (req.method === 'GET' && url === '/health') {
+    return send(res, 200, { status: 'ok', uptime: Math.round(process.uptime()), providers: providerList().filter((p) => p.enabled).map((p) => p.id) });
+  }
 
   // static (no auth needed for the shell; API calls below are authed)
   if (req.method === 'GET' && (url === '/' || url.startsWith('/index') || MIME[path.extname(url)])) {
@@ -261,6 +283,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[ai-gateway] listening on http://${HOST}:${PORT}`);
-  console.log(`[ai-gateway] providers: ${providerList().map((p) => `${p.id}${p.enabled ? '' : '(off)'}`).join(', ')}`);
+  log(`agentmux listening on http://${HOST}:${PORT}`);
+  log(`providers: ${providerList().map((p) => `${p.id}${p.enabled ? '' : '(off)'}`).join(', ')}`);
+  const gc = () => { const n = store.gcOrphans(); if (n) log(`gc: removed ${n} orphan workspace(s)`); };
+  gc();
+  setInterval(gc, 6 * 3600 * 1000).unref();
 });

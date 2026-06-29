@@ -154,6 +154,9 @@
   .send{width:38px;height:38px;border-radius:50%;border:0;background:var(--accent);color:#fff;cursor:pointer;font-size:17px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:.12s}
   .send:hover{background:#5b7bff}
   .send:disabled{opacity:.35;cursor:default}
+  .send.stopbtn{background:#d65b54}
+  .send.stopbtn:hover{background:#e0655e}
+  .stopnote{font-size:12px;color:var(--muted);margin-top:4px}
   .hint{margin:6px 0 0;font-size:11px;color:var(--muted)}
 </style>
 </head>
@@ -180,7 +183,7 @@
         <textarea id="input" rows="1" placeholder="메시지를 입력하세요…  (Enter 전송, Shift+Enter 줄바꿈)"></textarea>
         <div class="controls">
           <div class="dd" id="ddCombo"></div>
-          <button class="send" id="send" onclick="sendMsg()" title="전송">↑</button>
+          <button class="send" id="send" onclick="onSend()" title="전송">↑</button>
         </div>
       </div>
       <div class="hint" id="hint"></div>
@@ -192,7 +195,9 @@
 <script>
 const $ = (s)=>document.querySelector(s);
 let TOKEN = localStorage.getItem('gw_token') || '';
-let convId = null, busy = false, providers = [], curProvider = '', curModel = '';
+let convId = null, busy = false, providers = [], curProvider = '', curModel = '', curCtrl = null;
+function onSend(){ if(busy) stopGen(); else sendMsg(); }
+function stopGen(){ if(curCtrl) curCtrl.abort(); }
 
 function setToken(){
   const t = prompt('Gateway 토큰을 입력하세요:', TOKEN);
@@ -347,7 +352,8 @@ async function sendMsg(){
   thinking.innerHTML='<span></span><span></span><span></span><span></span><span></span>';
   segs.appendChild(thinking);
   function killThinking(){ if(thinking.parentNode) thinking.remove(); }
-  busy=true; $('#send').disabled=true;
+  busy=true; curCtrl=new AbortController();
+  const sendBtn=$('#send'); sendBtn.classList.add('stopbtn'); sendBtn.textContent='■'; sendBtn.title='중지';
 
   // 세그먼트별 타자기: claude의 덩어리 출력을 부드럽게, 도구 전후 순서 유지
   let curEl=null, curTarget='', curShown=0, ticking=false, streamDone=false, errMsg=null, resolveDrain;
@@ -367,7 +373,7 @@ async function sendMsg(){
   function pump(){ if(!ticking){ ticking=true; requestAnimationFrame(tick); } }
 
   try{
-    const r = await fetch('/api/chat',{method:'POST',headers:H(),
+    const r = await fetch('/api/chat',{method:'POST',headers:H(), signal:curCtrl.signal,
       body:JSON.stringify({provider, model:curModel, conversationId:convId, message:text})});
     const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
     while(true){
@@ -389,10 +395,15 @@ async function sendMsg(){
     streamDone=true; pump();
     if(!curEl || curShown>=curTarget.length){ renderCur(); if(curEl) curEl.classList.remove('cursor'); resolveDrain(); }
     await drained;
-  }catch(e){ errMsg=String(e); snapCur(); }
+  }catch(e){
+    if(e.name==='AbortError' || (curCtrl && curCtrl.signal.aborted)){
+      snapCur(); const n=document.createElement('div'); n.className='stopnote'; n.textContent='⏹ 중지됨'; segs.appendChild(n);
+    } else { errMsg=String(e); snapCur(); }
+  }
   killThinking();
   if(errMsg){ const er=document.createElement('div'); er.className='err'; er.textContent='⚠ '+errMsg; segs.appendChild(er); }
-  busy=false; $('#send').disabled=false;
+  busy=false; curCtrl=null;
+  sendBtn.classList.remove('stopbtn'); sendBtn.textContent='↑'; sendBtn.title='전송';
 }
 
 $('#sidebarToggle').addEventListener('click',()=> document.body.classList.toggle('sidebar-collapsed'));
