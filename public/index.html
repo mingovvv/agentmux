@@ -229,6 +229,15 @@ async function sendCouncil(){
   msg.innerHTML=`<div class="avatar council-av">🗣</div><div class="body"><div class="role">원탁회의 · 토론</div><div class="council-body"></div></div>`;
   w.appendChild(msg); scroll();
   const cbody=msg.querySelector('.council-body'); const blocks={};
+  // per-card typewriter (same smoothing as normal chat; multiple cards drain in one loop)
+  let ticking=false;
+  function tick(){
+    let active=false;
+    for(const k in blocks){ const b=blocks[k];
+      if(b.shown<b.target.length){ const rem=b.target.length-b.shown; b.shown=Math.min(b.target.length, b.shown+Math.max(1,Math.ceil(rem/25))); b.el.innerHTML=md(b.target.slice(0,b.shown)); active=true; } }
+    if(active){ scroll(); requestAnimationFrame(tick); } else { ticking=false; }
+  }
+  function pump(){ if(!ticking){ ticking=true; requestAnimationFrame(tick); } }
   const agentLabel=(id)=>{ const p=providers.find(x=>x.id===id); return p?p.label:id; };
   function addRound(ev){
     const r=document.createElement('div'); r.className='cround';
@@ -237,7 +246,7 @@ async function sendCouncil(){
     for(const a of ev.agents){
       const card=document.createElement('div'); card.className='ccard'+(ev.round===3?' synth':'');
       card.innerHTML=`<div class="ccard-hd"><span class="cicon ${esc(a)}">${providerIcon(a)}</span>${esc(agentLabel(a))}</div><div class="content"></div>`;
-      cards.appendChild(card); blocks[ev.round+':'+a]=card.querySelector('.content');
+      cards.appendChild(card); blocks[ev.round+':'+a]={el:card.querySelector('.content'), target:'', shown:0};
     }
     cbody.appendChild(r); scroll();
   }
@@ -254,7 +263,7 @@ async function sendCouncil(){
         const chunk=buf.slice(0,i); buf=buf.slice(i+2); const line=chunk.replace(/^data: /,''); if(!line) continue;
         let ev; try{ev=JSON.parse(line);}catch{continue;}
         if(ev.type==='round') addRound(ev);
-        else if(ev.type==='delta'){ const el=blocks[ev.round+':'+ev.agent]; if(el){ el._acc=(el._acc||'')+ev.text; el.innerHTML=md(el._acc); scroll(); } }
+        else if(ev.type==='delta'){ const b=blocks[ev.round+':'+ev.agent]; if(b){ b.target+=ev.text; pump(); } }
         else if(ev.type==='error') errMsg=ev.message;
       }
     }
