@@ -219,12 +219,13 @@
   .sp.failed .sp-card .content{color:#ffb3b3}
   .sp.failed .av{filter:grayscale(.4);opacity:.75}
   /* moderator stage-direction line */
-  .mod-line{display:flex;align-items:flex-start;gap:12px;margin:1px 0;animation:fade .25s}
+  .mod-line{display:flex;align-items:center;gap:12px;margin:1px 0;animation:fade .25s}
   .mod-line .ml-ic{flex-shrink:0;width:31px;height:31px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1px dashed #4a4170;font-size:17px;line-height:1}
   .mod-line.mod-think .ml-tx{display:none}
   .mod-line .ml-body{flex:1;min-width:0}
-  .mod-line .ml-tx{font-size:12.5px;color:#9aa0ac;font-style:italic;line-height:1.55;padding-top:6px}
+  .mod-line .ml-tx{font-size:12.5px;color:#9aa0ac;font-style:italic;line-height:1.55}
   .mod-line .ml-tx strong,.mod-line .ml-tx b{color:#c2c9d6;font-style:normal}
+  .mod-line .livedot{margin-top:0}
   /* user interjection (chair) */
   .sp.chair{flex-direction:row-reverse}
   .sp.chair .sp-main{display:flex;flex-direction:column;align-items:flex-end}
@@ -274,6 +275,14 @@
   .hero-sub b{color:var(--text);font-weight:600}
   main.council-welcome .inputbox{border-color:#3a3f6b;box-shadow:0 0 26px rgba(109,139,255,.16)}
   .hint{margin:6px 0 0;font-size:11px;color:var(--muted)}
+  /* jump-to-latest button (shown when auto-scroll is detached) */
+  .scrolldown{position:absolute;left:50%;bottom:102px;transform:translateX(-50%) translateY(6px) scale(.92);
+    width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--panel2);color:var(--text);
+    cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;
+    box-shadow:0 6px 20px rgba(0,0,0,.45);opacity:0;visibility:hidden;transition:.16s ease;z-index:20}
+  .scrolldown.show{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0) scale(1)}
+  .scrolldown:hover{border-color:var(--accent);background:#222734;color:#fff}
+  main.welcome .scrolldown{display:none}
 </style>
 </head>
 <body>
@@ -295,6 +304,7 @@
     <div class="spacer"></div>
   </header>
   <div id="chat"><div class="empty"><h2>무엇을 도와드릴까요?</h2><div>모델을 선택하고 메시지를 입력하세요.</div></div></div>
+  <button class="scrolldown" id="scrollDown" onclick="scrollBottom()" title="맨 아래로">↓</button>
   <div class="composer">
     <div class="cwrap">
       <div class="hero" id="hero">무엇을 도와드릴까요?</div>
@@ -344,7 +354,7 @@ function newCouncil(){ leaveLive(); convId=null; councilMode=true; reflectUI(); 
 function stopDebate(){ if(debateId) fetch('/api/council/'+debateId+'/stop',{method:'POST',headers:H()}).catch(()=>{}); }
 function sendInterjection(){
   const ta=$('#input'); const text=ta.value.trim(); if(!text||!debateId) return;
-  ta.value=''; autosize();
+  ta.value=''; autosize(); stick=true; reflectScrollBtn();
   fetch('/api/council/'+debateId+'/say',{method:'POST',headers:H(),body:JSON.stringify({text})}).catch(()=>{});
 }
 
@@ -352,6 +362,7 @@ async function sendCouncil(){
   if(busy) return;
   const ta=$('#input'); const text=ta.value.trim(); if(!text) return;
   ta.value=''; autosize(); $('#main').classList.remove('welcome');
+  stick=true; reflectScrollBtn();
   const w=ensureWrap();
   const msg=document.createElement('div'); msg.className='msg assistant debate-msg';
   msg.innerHTML=`<div class="debate">
@@ -567,6 +578,7 @@ function renderEmpty(){
     ? '🗣 토론 모드<span class="hero-sub">질문을 던지면 3개의 AI가 각자 답하고, 사회자의 진행 아래 서로 지목해 반박합니다. 도중 언제든 끼어들어 토론의 흐름을 바꿀 수 있어요.<br><br>입력창 오른쪽 드롭다운에서 <b>사회자</b>를 직접 고르세요 — 사회자가 쟁점을 잡고, 누가 누구에게 반박할지 지목하며, 마지막에 결론을 종합합니다.</span>'
     : '무엇을 도와드릴까요?';
   $('#chat').innerHTML='<div class="empty"></div>';
+  stick=true; reflectScrollBtn();
 }
 
 async function openConv(id){
@@ -576,8 +588,9 @@ async function openConv(id){
   convId=id; curProvider=c.provider; curModel=firstModelOf(c.provider); buildCombo();
   $('#main').classList.remove('welcome');
   $('#chat').innerHTML='<div class="wrap" id="wrap"></div>';
+  stick=true; reflectScrollBtn();
   for(const m of c.messages){ addMsg(m.role, m.content, c.provider); }
-  loadConvs(); scroll();
+  loadConvs(); scrollBottom();
 }
 
 function esc(s){ return (s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
@@ -631,13 +644,24 @@ function addMsg(role, content, provider){
   el.innerHTML=`${av}<div class="body"><div class="role">${label}</div><div class="content">${md(content)}</div></div>`;
   w.appendChild(el); scroll(); return el.querySelector('.content');
 }
-function scroll(){ const c=$('#chat'); c.scrollTop=c.scrollHeight; }
+// Auto-scroll only sticks to the bottom while the user is already near it.
+// Scroll up and it stays put (so you can read back); a button jumps you to the latest.
+let stick=true;
+function atBottom(c){ return c.scrollHeight - c.scrollTop - c.clientHeight < 70; }
+function scrollBottom(){ const c=$('#chat'); c.scrollTop=c.scrollHeight; stick=true; reflectScrollBtn(); }
+function scroll(){ if(stick){ const c=$('#chat'); c.scrollTop=c.scrollHeight; } }
+function reflectScrollBtn(){ const btn=$('#scrollDown'); if(btn) btn.classList.toggle('show', !stick); }
+(function initScrollWatch(){
+  const c=$('#chat');
+  c.addEventListener('scroll', ()=>{ stick=atBottom(c); reflectScrollBtn(); }, {passive:true});
+})();
 
 async function sendMsg(){
   if(busy) return;
   const ta=$('#input'); const text=ta.value.trim(); if(!text) return;
   const provider=curProvider;
   if(!provider){ alert('사용 가능한 에이전트가 없습니다'); return; }
+  stick=true; reflectScrollBtn();
   ta.value=''; autosize();
   $('#main').classList.remove('welcome');
   addMsg('user', text);
