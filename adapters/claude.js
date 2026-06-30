@@ -18,7 +18,7 @@ function flattenResult(content) {
   return '';
 }
 
-function run({ prompt, sessionId, workdir, model, onEvent, signal }) {
+function run({ prompt, sessionId, workdir, model, onEvent, signal, env }) {
   return new Promise((resolve, reject) => {
     const isResume = !!sessionId;
     const sid = sessionId || crypto.randomUUID();
@@ -39,7 +39,7 @@ function run({ prompt, sessionId, workdir, model, onEvent, signal }) {
 
     const child = spawn('claude', args, {
       cwd: workdir,
-      env: process.env,
+      env: env ? { ...process.env, ...env } : process.env,
     });
     child.stdin.end(); // avoid 3s stdin wait in print mode
 

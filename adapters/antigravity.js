@@ -32,7 +32,7 @@ function mtime(f) { try { return fs.statSync(path.join(CONV_DIR, f)).mtimeMs; } 
 // not stream that as if it were the answer; detect it and retry with a fresh call.
 const TRANSIENT = /no active conversation|trajectory not found|failed to send message|conversation not found/i;
 
-function attempt({ prompt, sessionId, workdir, model, onEvent, signal }) {
+function attempt({ prompt, sessionId, workdir, model, onEvent, signal, env }) {
   return new Promise((resolve, reject) => {
     const before = sessionId ? null : new Set(listDbs());
 
@@ -43,7 +43,7 @@ function attempt({ prompt, sessionId, workdir, model, onEvent, signal }) {
       : ['-p', prompt, ...flags];
     if (model) args.push('--model', model);
 
-    const child = spawn('agy', args, { cwd: workdir, env: process.env });
+    const child = spawn('agy', args, { cwd: workdir, env: env ? { ...process.env, ...env } : process.env });
     child.stdin.end(); // print mode otherwise waits on stdin
 
     let out = '';

@@ -98,8 +98,10 @@ async function runAgent({ provider, sessionId, workdir, model, message, onEvent,
   const TMO = CONFIG.requestTimeoutMs || 300000;
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; ac.abort(); }, TMO);
+  // per-provider env override (e.g. HOME / CLAUDE_CONFIG_DIR to pick an account, or API keys)
+  const penv = ((CONFIG.providers || {})[provider] || {}).env;
   try {
-    return await adapter.run({ prompt: message, sessionId, workdir, model: model || undefined, onEvent, signal: ac.signal });
+    return await adapter.run({ prompt: message, sessionId, workdir, model: model || undefined, onEvent, signal: ac.signal, env: penv });
   } catch (e) {
     throw timedOut ? new Error(`request timed out after ${Math.round(TMO / 1000)}s`) : e;
   } finally {

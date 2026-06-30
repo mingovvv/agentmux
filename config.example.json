@@ -8,6 +8,7 @@
     "claude": {
       "enabled": true,
       "label": "Claude",
+      "_comment_env": "optional: per-provider env merged into the CLI process. Use it to pick which account/config a CLI uses (HOME or CLAUDE_CONFIG_DIR), or to pass API keys. Example: \"env\": { \"HOME\": \"/home/me/.claude-work\" }",
       "models": [
         { "id": "claude-opus-4-8",           "label": "Opus 4.8" },
         { "id": "claude-sonnet-4-6",         "label": "Sonnet 4.6" },

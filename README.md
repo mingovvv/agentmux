@@ -115,7 +115,30 @@ an always-on composer to interject.
 | `port` / `host` | bind address. Use `127.0.0.1` or a **VPN IP** (e.g. Tailscale); do **not** expose publicly without a reverse proxy + real auth |
 | `authToken` | bearer token required by every API call |
 | `maxConcurrentPerProvider` | concurrent agent runs per provider (default `3`) |
-| `providers.<id>` | `{ enabled, label, models: [{ id, label }] }` |
+| `providers.<id>` | `{ enabled, label, models: [{ id, label }], env? }` |
+
+### Picking which account / config a CLI uses (`providers.<id>.env`)
+
+Each CLI authenticates as whatever account is logged in for the **user/HOME that runs
+agentmux**. Since the headless CLIs read their auth from the home directory
+(`~/.claude`, `~/.codex`, `~/.gemini`), you can point a single provider at a different
+account or config without changing how the service runs, via an optional per-provider
+`env` map that is merged into that CLI's process environment:
+
+```jsonc
+"claude": {
+  "enabled": true, "label": "Claude",
+  "env": { "HOME": "/home/me/.claude-work" },   // use the account logged in under this HOME
+  // or: "env": { "CLAUDE_CONFIG_DIR": "/home/me/.claude-work/.claude" }
+  "models": [ /* … */ ]
+}
+```
+
+This is portable: anyone cloning the repo can map each CLI to their own setup. The same
+mechanism passes any env a CLI honors (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+proxies). The target directory must be **readable/writable by the user running agentmux**
+(so the CLI can refresh its tokens). `antigravity` blocks `--dangerously-skip-permissions`
+when running as `root`, so prefer a non-root user.
 
 ## Tool policy & concurrency
 

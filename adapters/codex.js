@@ -24,7 +24,7 @@ function cleanCmd(c) {
   return m ? m[1] : c;
 }
 
-function run({ prompt, sessionId, workdir, model, onEvent, signal }) {
+function run({ prompt, sessionId, workdir, model, onEvent, signal, env }) {
   return new Promise((resolve, reject) => {
     // read-only sandbox: 셸은 읽기/웹검색만, 호스트 쓰기/변경 차단 (resume도 -c 방식만 허용)
     const base = ['--json', '--skip-git-repo-check', '-c', 'sandbox_mode="read-only"'];
@@ -34,7 +34,7 @@ function run({ prompt, sessionId, workdir, model, onEvent, signal }) {
       ? ['exec', 'resume', ...base, sessionId, prompt]
       : ['exec', ...base, prompt];
 
-    const child = spawn('codex', args, { cwd: workdir, env: process.env });
+    const child = spawn('codex', args, { cwd: workdir, env: env ? { ...process.env, ...env } : process.env });
     child.stdin.end(); // codex waits on stdin otherwise
 
     let buf = '';
