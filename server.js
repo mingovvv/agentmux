@@ -286,7 +286,7 @@ async function runDebate(d) {
   if (d.status === 'running') {
     d.emit({ type: 'phase', phase: 'disputes', label: '쟁점 정리' });
     try {
-      const raw = await moderate(d, `당신은 토론 사회자입니다. 아래는 "${q}"에 대한 각 참가자의 독립 답변입니다.\n\n${compactTranscript(d, parts.length)}\n\n의견이 실제로 갈리는 핵심 쟁점 2~3개를 뽑아 JSON으로만 답하세요:\n{"disputes":[{"id":"1","title":"짧은 제목","detail":"무엇이 왜 갈리는지 한 문장"}]}`);
+      const raw = await moderate(d, `당신은 토론 사회자입니다. 아래는 "${q}"에 대한 각 참가자의 독립 답변입니다.\n\n${compactTranscript(d, parts.length)}\n\n먼저 결론이 대체로 일치하는지 보세요. 그런 다음 '실제로' 남는 이견(결론·근거·우선순위·전제·조건·리스크의 차이)만 0~3개 뽑으세요. 모두 같은 결론이고 더 다툴 거리가 없으면 disputes를 빈 배열로 두세요. 없는 갈등을 지어내거나 누군가에게 반대 입장을 강요하지 마세요. JSON으로만:\n{"consensus": true 또는 false, "disputes":[{"id":"1","title":"짧은 제목","detail":"무엇이 왜 갈리는지 한 문장"}]}`);
       const j = extractJson(raw);
       d.disputes = (j && Array.isArray(j.disputes)) ? j.disputes.slice(0, 3) : [];
     } catch { d.disputes = []; }
@@ -294,11 +294,16 @@ async function runDebate(d) {
   }
 
   // ── Phase 2: moderator-directed ping-pong (interruptible) ──
-  d.emit({ type: 'phase', phase: 'debate', label: '교차 반박' });
+  // If the openings already agree (no real disputes), never manufacture opposition —
+  // acknowledge the consensus and go straight to the wrap-up.
+  if (d.status === 'running' && !d.disputes.length) {
+    moderatorSay(d, '참가자들의 결론이 큰 틀에서 일치합니다. 억지로 대립시키지 않고 바로 정리하겠습니다.');
+  }
+  if (d.disputes.length) d.emit({ type: 'phase', phase: 'debate', label: '교차 반박' });
   let turns = 0;        // productive debate turns (capped at MAX_TURNS)
   let guard = 0;        // hard iteration guard against any spin
   let errStreak = 0;    // consecutive genuine errors → bail out
-  while (d.status === 'running' && turns < MAX_TURNS && guard < MAX_TURNS * 4) {
+  while (d.status === 'running' && d.disputes.length && turns < MAX_TURNS && guard < MAX_TURNS * 4) {
     guard++;
     // (a) user interjection is top priority
     let userNote = '';
@@ -313,7 +318,7 @@ async function runDebate(d) {
     // (b) moderator decides the next move
     let decRaw = '';
     try {
-      decRaw = await moderate(d, `당신은 토론 사회자입니다. 질문: "${q}"\n\n[쟁점]\n${(d.disputes || []).map((x) => `${x.id}. ${x.title}`).join('\n') || '(없음)'}\n\n[최근 토론]\n${compactTranscript(d)}${userNote}\n\n다음에 누가 누구에게 무엇을 말할지 정하세요. 한쪽으로 치우치지 말고 핑퐁이 되게 번갈아 지목하고, 한 쟁점에만 머물지 말고 아직 덜 다룬 쟁점으로도 균형 있게 옮겨가세요(disputeId를 가급적 명시). 토론이 충분히 무르익었거나 합의/결렬이 분명하면 종료하세요. JSON으로만:\n{"action":"direct","say":"진행 멘트 한 줄(선택)","speaker":"${ids.join('|')}","target":"${ids.join('|')} 또는 빈값","disputeId":"쟁점번호 또는 빈값","instruction":"speaker에게 줄 구체적 지시"}\n또는\n{"action":"conclude","say":"마무리 멘트 한 줄"}`);
+      decRaw = await moderate(d, `당신은 토론 사회자입니다. 질문: "${q}"\n\n[쟁점]\n${(d.disputes || []).map((x) => `${x.id}. ${x.title}`).join('\n') || '(없음)'}\n\n[최근 토론]\n${compactTranscript(d)}${userNote}\n\n다음에 누가 누구에게 무엇을 말할지 정하세요. 번갈아 지목하고, 한 쟁점에만 머물지 말고 아직 덜 다룬 쟁점으로도 균형 있게 옮겨가세요(disputeId를 가급적 명시). **절대 참가자에게 본심과 다른 입장을 강요하지 마세요(억지 반대·악마의 변호인 금지).** 각자 자기 입장에서 상대 근거의 허점을 지적하거나 보완하게만 하세요. 더 다툴 실질 이견이 없거나 이미 합의됐으면 즉시 conclude 하세요. JSON으로만:\n{"action":"direct","say":"진행 멘트 한 줄(선택)","speaker":"${ids.join('|')}","target":"${ids.join('|')} 또는 빈값","disputeId":"쟁점번호 또는 빈값","instruction":"speaker에게 줄 구체적 지시"}\n또는\n{"action":"conclude","say":"마무리 멘트 한 줄"}`);
     } catch {
       if (d.interrupt === 'user') continue;   // user jumped in while moderating
       if (d.status !== 'running') break;       // stopped / disconnected
@@ -332,7 +337,7 @@ async function runDebate(d) {
 
     const turn = newTurn({ speaker, target, model: modelOf(speaker), role: 'rebut', disputeId: dec.disputeId });
     d.emit({ type: 'turn_start', turnId: turn.id, speaker, target, disputeId: dec.disputeId, role: 'rebut' });
-    const prompt = `당신은 이 토론의 참가자입니다. 질문: "${q}"\n\n[지금까지의 토론]\n${compactTranscript(d)}\n\n[사회자 지시]\n${instruction}${target ? `\n특히 ${clabel(target)}의 주장에 직접 반박하거나 응답하세요.` : ''}\n\n간결하고 날카롭게, 새 근거를 더하세요. 같은 말 반복은 금지.`;
+    const prompt = `당신은 이 토론의 참가자입니다. 질문: "${q}"\n\n[지금까지의 토론]\n${compactTranscript(d)}\n\n[사회자 지시]\n${instruction}${target ? `\n특히 ${clabel(target)}의 주장에 직접 반박하거나 응답하세요.` : ''}\n\n간결하고 날카롭게, 새 근거를 더하세요. 같은 말 반복은 금지. 단, 당신의 실제 입장을 유지하세요 — 동의하면 동의한다고 말해도 됩니다(억지로 반대 입장을 취하지 마세요).`;
     try {
       await debaterTurn(d, turn, prompt);
       d.transcript.push(turn);

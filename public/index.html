@@ -220,8 +220,7 @@
   .sp.failed .av{filter:grayscale(.4);opacity:.75}
   /* moderator stage-direction line */
   .mod-line{display:flex;align-items:flex-start;gap:12px;margin:1px 0;animation:fade .25s}
-  .mod-line .ml-ic{flex-shrink:0;width:31px;height:31px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1px dashed #4a4170;font-size:13px;color:var(--accent2)}
-  .mod-line .ml-ic .cicon{width:19px;height:19px}
+  .mod-line .ml-ic{flex-shrink:0;width:31px;height:31px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1px dashed #4a4170;font-size:17px;line-height:1}
   .mod-line.mod-think .ml-tx{display:none}
   .mod-line .ml-body{flex:1;min-width:0}
   .mod-line .ml-tx{font-size:12.5px;color:#9aa0ac;font-style:italic;line-height:1.55;padding-top:6px}
@@ -399,7 +398,7 @@ async function sendCouncil(){
   function seatOn(k){ if(!k) return; seatCount[k]=(seatCount[k]||0)+1; if(seats[k]) seats[k].classList.add('live'); }
   function seatOff(k){ if(!k) return; seatCount[k]=Math.max(0,(seatCount[k]||0)-1); if(!seatCount[k]&&seats[k]) seats[k].classList.remove('live'); }
   function clearLight(){ for(const k in seatCount) seatCount[k]=0; for(const id in seats) seats[id].classList.remove('live'); }
-  function modIcon(){ return moderatorId?`<span class="cicon ${esc(moderatorId)}">${providerIcon(moderatorId)}</span>`:'◆'; }
+  function modIcon(){ return '📢'; }
   // a thread placeholder while the moderator deliberates (so the thread isn't empty during the gap)
   let modThinkEl=null;
   function showModThinking(){ if(modThinkEl||curPhase==='closing') return;
