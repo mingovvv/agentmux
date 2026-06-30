@@ -77,20 +77,34 @@ GET  /api/providers
 GET  /api/conversations   ·   GET /api/conversations/:id   ·   DELETE /api/conversations/:id
 ```
 
-### Council — multi-agent debate
+### Council — moderator-driven, interruptible debate
 
 ```
-POST /api/council
-{ "question": "...", "synthesizer"?: "claude" }
-  → SSE: round{round,label,agents} | delta{agent,round,text} | error | done
+POST   /api/council              { "question": "...", "moderator"?: "claude" }   → SSE, returns debateId
+POST   /api/council/:id/say      { "text": "..." }     # interject mid-debate (you are the chair)
+POST   /api/council/:id/stop                            # end the debate
+
+SSE events:
+  debate{debateId,participants,moderator} | phase{phase,label} | disputes{items}
+  turn_start{turnId,speaker,target?,disputeId?,role} | delta{turnId,speaker,text}
+  turn_end{turnId,interrupted?} | user{text} | consensus{summary,points} | done | error
 ```
 
-Every enabled agent answers independently, then critiques the others, then the
-**synthesizer** agent concludes. Since the agents are different model families
-(Anthropic / OpenAI / Google), the debate is genuinely diverse. ~7 model calls per
-question (slower / costlier). In the web UI it's a first-class mode (sidebar **🗣 토론**
-or the 🗣 toggle) rendered as a 3-lane "arena": a participant bar, a round stepper, each
-agent in its own column, and a highlighted synthesis panel.
+Every enabled agent first answers independently. A **moderator** agent (its own session,
+isolated from its debater role) then extracts the real points of contention and directs a
+sequential, targeted **ping-pong** — "speaker → target on dispute X" — so the exchange is
+genuinely adversarial and varies per question. It ends when the moderator judges the debate
+settled (or a turn cap), with a synthesis + agree/split consensus map.
+
+You are the **chair**: `POST …/say` injects a message that aborts the in-flight turn and is
+handled first by the moderator, who folds it in and re-steers. Debate turns run *stateless*
+(the shared transcript is the only state), so interrupting one agent never corrupts another.
+
+Since the agents are different model families (Anthropic / OpenAI / Google), the debate is
+genuinely diverse. In the web UI it's a first-class mode (sidebar **🗣 토론** or the 🗣 toggle)
+rendered as a "stage": a sticky roster that spotlights the current speaker, a dispute tracker,
+a speech thread with targeting tags, moderator stage-directions, and a consensus panel — with
+an always-on composer to interject.
 
 ## Configuration
 

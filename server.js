@@ -2,6 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const adapters = require('./adapters');
 const store = require('./lib/store');
 
@@ -125,38 +126,227 @@ async function runTurn({ provider, conversationId, message, model, onEvent, sign
   return { conversationId: conv.id, ...result };
 }
 
-// Council: every enabled agent answers → critiques the others → one synthesizes.
-async function council({ question, synthesizer, onEvent, signal }) {
-  const parts = providerList().filter((p) => p.enabled).map((p) => p.id);
+/* ====================================================================
+ * Council / Debate engine — moderator-driven, interruptible
+ *
+ * Flow: opening (parallel independent answers) → moderator extracts the
+ * real points of contention → sequential ping-pong where the moderator
+ * directs "speaker → target on dispute" each turn → synthesis + consensus.
+ *
+ * The user is the chair: POST /api/council/:id/say injects a message that
+ * aborts the in-flight turn and is handled first by the moderator.
+ * The moderator runs as its OWN session (key "mod:<provider>"), isolated
+ * from the same provider's debater session, so e.g. Claude-as-moderator
+ * and Claude-as-debater never share context.
+ * ==================================================================== */
+const debates = new Map();
+const COUNCIL = CONFIG.council || {};
+const MAX_TURNS = COUNCIL.maxTurns || 8;
+
+function extractJson(s) {
+  if (!s) return null;
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fence ? fence[1] : s;
+  const a = body.indexOf('{'); const b = body.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  try { return JSON.parse(body.slice(a, b + 1)); } catch { return null; }
+}
+function clabel(id) { return (providerList().find((p) => p.id === id) || {}).label || id; }
+
+let _turnSeq = 0;
+function newTurn(o) { return { id: 't' + (++_turnSeq), ts: Date.now(), text: '', ...o }; }
+function makeAbort(d) { const ac = new AbortController(); d.aborters.add(ac); return ac; }
+function clearAbort(d, ac) { d.aborters.delete(ac); }
+function abortAll(d) { for (const ac of d.aborters) { try { ac.abort(); } catch {} } }
+
+function createDebate({ question, moderator }) {
+  const parts = providerList().filter((p) => p.enabled).map((p) => ({
+    key: p.id, label: p.label, model: (p.models && p.models[0] && p.models[0].id) || undefined,
+  }));
   if (!parts.length) throw new Error('no enabled providers');
-  const labelOf = (id) => (providerList().find((p) => p.id === id) || {}).label || id;
-  const syn = (synthesizer && adapters.get(synthesizer)) ? synthesizer : (parts.includes('claude') ? 'claude' : parts[0]);
-  const wd = store.workspaceFor('_council', 'shared');
-  const tag = (agent, round) => (ev) => { if (ev.type === 'delta') onEvent({ type: 'delta', agent, round, text: ev.text }); };
-  const ask = (provider, round, message) =>
-    runAgent({ provider, workdir: wd, message, onEvent: tag(provider, round), signal })
-      .then((r) => ({ agent: provider, text: r.text || '' }))
-      .catch((e) => { onEvent({ type: 'delta', agent: provider, round, text: `(오류: ${e.message})` }); return { agent: provider, text: '' }; });
-  const block = (arr) => arr.map((x) => `[${labelOf(x.agent)}]\n${x.text}`).join('\n\n');
+  const ids = parts.map((p) => p.key);
+  const mod = (moderator && adapters.get(moderator)) ? moderator : (ids.includes('claude') ? 'claude' : ids[0]);
+  const id = crypto.randomUUID();
+  const d = {
+    id, question, moderator: mod, participants: parts,
+    transcript: [], disputes: [], createdSessions: [],
+    workdir: store.workspaceFor('_council', id),
+    aborters: new Set(), pendingUser: [], interrupt: null,
+    status: 'running', clients: new Set(),
+    emit(ev) { for (const res of this.clients) { try { sse(res, ev); } catch {} } },
+  };
+  debates.set(id, d);
+  return d;
+}
+function cleanupDebate(d) {
+  try { fs.rmSync(d.workdir, { recursive: true, force: true }); } catch {}
+  // turns run stateless (fresh session each call); remove every session we created
+  for (const { provider, sessionId } of d.createdSessions) {
+    try { store.rmSession(provider, sessionId); } catch {}
+  }
+}
 
-  // Round 1 — independent answers (parallel)
-  onEvent({ type: 'round', round: 1, label: '독립 답변', agents: parts });
-  const r1 = await Promise.all(parts.map((p) =>
-    ask(p, 1, `다음 질문에 당신의 의견으로 답하세요. 핵심 위주로 간결하게.\n\n[질문]\n${question}`)));
+// Debate turns run STATELESS — the shared transcript (passed in every prompt) is the
+// only state, so there's no hidden per-agent session to corrupt on abort and no context
+// bleed between a provider's moderator and debater roles. We still capture each freshly
+// created session id so cleanup can remove it.
 
-  // Round 2 — rebut / refine after seeing the others
-  onEvent({ type: 'round', round: 2, label: '상호 반박·보완', agents: parts });
-  const r2 = await Promise.all(parts.map((p) => {
-    const others = r1.filter((x) => x.agent !== p).map((x) => `[${labelOf(x.agent)}]\n${x.text}`).join('\n\n');
-    const mine = (r1.find((x) => x.agent === p) || {}).text || '';
-    return ask(p, 2, `질문: ${question}\n\n[당신의 1차 답변]\n${mine}\n\n[다른 AI들의 답변]\n${others}\n\n다른 답변과 비교해 동의/반대할 점과 보완점을 밝히고, 필요하면 입장을 수정하세요. 토론하듯 간결하게.`);
+// a debater turn — streams deltas into turn.text live (so partials survive aborts)
+async function debaterTurn(d, turn, prompt) {
+  const ac = makeAbort(d);
+  try {
+    const r = await runAgent({
+      provider: turn.speaker, model: turn.model, sessionId: null, workdir: d.workdir,
+      message: prompt,
+      onEvent: (ev) => { if (ev.type === 'delta') { turn.text += ev.text; d.emit({ type: 'delta', turnId: turn.id, speaker: turn.speaker, text: ev.text }); } },
+      signal: ac.signal,
+    });
+    if (r.sessionId) d.createdSessions.push({ provider: turn.speaker, sessionId: r.sessionId });
+    if (r.text) turn.text = r.text;
+    return turn.text;
+  } finally { clearAbort(d, ac); }
+}
+
+// the moderator — also stateless; isolated from debaters by construction
+async function moderate(d, instruction) {
+  const ac = makeAbort(d);
+  let text = '';
+  try {
+    const r = await runAgent({
+      provider: d.moderator, sessionId: null, workdir: d.workdir,
+      message: instruction, onEvent: () => {}, signal: ac.signal,
+    });
+    if (r.sessionId) d.createdSessions.push({ provider: d.moderator, sessionId: r.sessionId });
+    text = r.text || '';
+  } finally { clearAbort(d, ac); }
+  return text;
+}
+function moderatorSay(d, text) {
+  if (!text) return;
+  const turn = newTurn({ speaker: '__moderator', role: 'moderator', text });
+  d.emit({ type: 'turn_start', turnId: turn.id, speaker: '__moderator', role: 'moderator' });
+  d.emit({ type: 'delta', turnId: turn.id, speaker: '__moderator', text });
+  d.emit({ type: 'turn_end', turnId: turn.id });
+  d.transcript.push({ role: 'moderator', text, ts: Date.now() });
+}
+
+function compactTranscript(d, limit = 16) {
+  return d.transcript.slice(-limit).map((t) => {
+    if (t.role === 'user') return `[좌장(사용자)] ${t.text}`;
+    if (t.role === 'moderator') return `[사회자] ${t.text}`;
+    const tgt = t.target ? ` → ${clabel(t.target)}` : '';
+    return `[${clabel(t.speaker)}${tgt}] ${t.text}`;
+  }).join('\n\n');
+}
+
+async function runDebate(d) {
+  const parts = d.participants;
+  const ids = parts.map((p) => p.key);
+  const modelOf = (k) => (parts.find((x) => x.key === k) || {}).model;
+  const q = d.question;
+
+  d.emit({
+    type: 'debate', debateId: d.id, question: q,
+    participants: parts.map((p) => ({ key: p.key, label: p.label, model: p.model })),
+    moderator: d.moderator,
+  });
+
+  // ── Phase 0: opening — independent answers in parallel ──
+  d.emit({ type: 'phase', phase: 'opening', label: '개회 · 독립 답변' });
+  await Promise.all(parts.map(async (p) => {
+    const turn = newTurn({ speaker: p.key, model: p.model, role: 'opening' });
+    d.emit({ type: 'turn_start', turnId: turn.id, speaker: p.key, role: 'opening' });
+    try { await debaterTurn(d, turn, `다음 질문에 당신의 의견을 분명하고 간결하게 답하세요. 입장을 명확히 하세요.\n\n[질문]\n${q}`); }
+    catch (e) { if (!turn.text) turn.text = `(오류: ${e.message})`; }
+    d.transcript.push(turn);
+    d.emit({ type: 'turn_end', turnId: turn.id, interrupted: !!d.interrupt });
   }));
 
-  // Synthesis — designated agent
-  onEvent({ type: 'round', round: 3, label: `종합 (${labelOf(syn)})`, agents: [syn] });
-  await ask(syn, 3, `아래는 "${question}" 에 대한 여러 AI의 토론입니다.\n\n=== 1라운드 (독립 답변) ===\n${block(r1)}\n\n=== 2라운드 (반박·보완) ===\n${block(r2)}\n\n위 토론을 종합해 최종 결론을 내려주세요. 합의점과 쟁점을 짚고, 가장 타당한 결론을 제시하세요.`);
+  // ── Phase 1: moderator extracts the real disputes ──
+  if (d.status === 'running') {
+    d.emit({ type: 'phase', phase: 'disputes', label: '쟁점 정리' });
+    try {
+      const raw = await moderate(d, `당신은 토론 사회자입니다. 아래는 "${q}"에 대한 각 참가자의 독립 답변입니다.\n\n${compactTranscript(d, parts.length)}\n\n의견이 실제로 갈리는 핵심 쟁점 2~3개를 뽑아 JSON으로만 답하세요:\n{"disputes":[{"id":"1","title":"짧은 제목","detail":"무엇이 왜 갈리는지 한 문장"}]}`);
+      const j = extractJson(raw);
+      d.disputes = (j && Array.isArray(j.disputes)) ? j.disputes.slice(0, 3) : [];
+    } catch { d.disputes = []; }
+    d.emit({ type: 'disputes', items: d.disputes });
+  }
 
-  onEvent({ type: 'done' });
+  // ── Phase 2: moderator-directed ping-pong (interruptible) ──
+  d.emit({ type: 'phase', phase: 'debate', label: '교차 반박' });
+  let turns = 0;        // productive debate turns (capped at MAX_TURNS)
+  let guard = 0;        // hard iteration guard against any spin
+  let errStreak = 0;    // consecutive genuine errors → bail out
+  while (d.status === 'running' && turns < MAX_TURNS && guard < MAX_TURNS * 4) {
+    guard++;
+    // (a) user interjection is top priority
+    let userNote = '';
+    if (d.pendingUser.length) {
+      const u = d.pendingUser.shift();
+      d.transcript.push({ role: 'user', text: u, ts: Date.now() });
+      d.emit({ type: 'user', text: u });
+      userNote = `\n\n[최우선] 좌장(사용자)이 방금 개입했습니다: "${u}"\n이 발언을 먼저 이해하고 반영하세요. 질문이면 누가 답할지 정하고, 새 논점이면 토론을 그쪽으로 트세요.`;
+    }
+    d.interrupt = null;
+
+    // (b) moderator decides the next move
+    let decRaw = '';
+    try {
+      decRaw = await moderate(d, `당신은 토론 사회자입니다. 질문: "${q}"\n\n[쟁점]\n${(d.disputes || []).map((x) => `${x.id}. ${x.title}`).join('\n') || '(없음)'}\n\n[최근 토론]\n${compactTranscript(d)}${userNote}\n\n다음에 누가 누구에게 무엇을 말할지 정하세요. 한쪽으로 치우치지 말고 핑퐁이 되게 번갈아 지목하세요. 토론이 충분히 무르익었거나 합의/결렬이 분명하면 종료하세요. JSON으로만:\n{"action":"direct","say":"진행 멘트 한 줄(선택)","speaker":"${ids.join('|')}","target":"${ids.join('|')} 또는 빈값","disputeId":"쟁점번호 또는 빈값","instruction":"speaker에게 줄 구체적 지시"}\n또는\n{"action":"conclude","say":"마무리 멘트 한 줄"}`);
+    } catch {
+      if (d.interrupt === 'user') continue;   // user jumped in while moderating
+      if (d.status !== 'running') break;       // stopped / disconnected
+      // genuine moderator error → fall through with empty decision (round-robin fallback)
+    }
+    if (d.interrupt === 'user') continue;
+    if (d.status !== 'running') break;
+
+    const dec = extractJson(decRaw) || {};
+    if (dec.action === 'conclude') { moderatorSay(d, dec.say); break; }
+
+    const speaker = ids.includes(dec.speaker) ? dec.speaker : ids[turns % ids.length];
+    const target = ids.includes(dec.target) && dec.target !== speaker ? dec.target : '';
+    const instruction = dec.instruction || '쟁점에 대해 당신의 입장을 변호하고 상대 주장을 반박하세요.';
+    if (dec.say) moderatorSay(d, dec.say);
+
+    const turn = newTurn({ speaker, target, model: modelOf(speaker), role: 'rebut', disputeId: dec.disputeId });
+    d.emit({ type: 'turn_start', turnId: turn.id, speaker, target, disputeId: dec.disputeId, role: 'rebut' });
+    const prompt = `당신은 이 토론의 참가자입니다. 질문: "${q}"\n\n[지금까지의 토론]\n${compactTranscript(d)}\n\n[사회자 지시]\n${instruction}${target ? `\n특히 ${clabel(target)}의 주장에 직접 반박하거나 응답하세요.` : ''}\n\n간결하고 날카롭게, 새 근거를 더하세요. 같은 말 반복은 금지.`;
+    try {
+      await debaterTurn(d, turn, prompt);
+      d.transcript.push(turn);
+      d.emit({ type: 'turn_end', turnId: turn.id });
+      turns++; errStreak = 0;
+    } catch (e) {
+      // user interrupt → keep partial, loop back to handle the interjection (does NOT consume a turn)
+      if (d.interrupt === 'user') {
+        turn.interrupted = true;
+        d.transcript.push(turn);
+        d.emit({ type: 'turn_end', turnId: turn.id, interrupted: true });
+        continue;
+      }
+      if (d.status !== 'running') { d.emit({ type: 'turn_end', turnId: turn.id, interrupted: true }); break; }
+      // genuine error/timeout → record, count the turn, bail if it keeps failing
+      if (!turn.text) turn.text = `(오류: ${e.message})`;
+      d.transcript.push(turn);
+      d.emit({ type: 'turn_end', turnId: turn.id, error: true });
+      turns++;
+      if (++errStreak >= 3) break;
+    }
+  }
+
+  // ── Phase 3: synthesis + consensus map (skip if user-stopped) ──
+  if (d.status === 'running') {
+    d.emit({ type: 'phase', phase: 'closing', label: '종합' });
+    let cj = {};
+    try {
+      const raw = await moderate(d, `토론을 마칩니다. 질문: "${q}"\n\n[전체 토론]\n${compactTranscript(d, 40)}\n\n사회자로서 최종 종합을 JSON으로만 작성하세요:\n{"summary":"3~5문장 결론","points":[{"point":"논점","status":"agree 또는 split","detail":"한 문장"}]}`);
+      cj = extractJson(raw) || { summary: raw };
+    } catch { /* leave empty */ }
+    d.emit({ type: 'consensus', summary: cj.summary || '', points: Array.isArray(cj.points) ? cj.points : [] });
+  }
+  d.emit({ type: 'done', debateId: d.id });
 }
 
 /* ------------------------------ routes ----------------------------- */
@@ -241,20 +431,44 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    // --- council: multi-agent debate (answer → rebut → synthesize) ---
+    // --- council: user interjection (abort in-flight turn, handle first) ---
+    if (req.method === 'POST' && url.startsWith('/api/council/') && url.endsWith('/say')) {
+      const d = debates.get(url.split('/')[3]);
+      if (!d) return send(res, 404, { error: 'debate not found' });
+      const body = await readBody(req);
+      const text = String(body.text || body.message || '').trim();
+      if (!text) return send(res, 400, { error: 'text required' });
+      d.pendingUser.push(text);
+      d.interrupt = 'user';
+      abortAll(d);
+      return send(res, 200, { ok: true });
+    }
+    // --- council: stop the debate ---
+    if (req.method === 'POST' && url.startsWith('/api/council/') && url.endsWith('/stop')) {
+      const d = debates.get(url.split('/')[3]);
+      if (!d) return send(res, 404, { error: 'debate not found' });
+      d.status = 'stopping'; d.interrupt = 'stop'; abortAll(d);
+      return send(res, 200, { ok: true });
+    }
+
+    // --- council: start a moderator-driven, interruptible debate (SSE) ---
     if (req.method === 'POST' && url === '/api/council') {
       const body = await readBody(req);
       const question = body.question || body.message;
       if (!question) return send(res, 400, { error: 'question required' });
       sseHead(res);
-      const ac = new AbortController();
-      req.on('close', () => ac.abort());
-      try {
-        await council({ question, synthesizer: body.synthesizer, onEvent: (ev) => sse(res, ev), signal: ac.signal });
-      } catch (e) {
-        sse(res, { type: 'error', message: String(e.message || e) });
-      }
-      return res.end();
+      let d;
+      try { d = createDebate({ question, moderator: body.moderator || body.synthesizer }); }
+      catch (e) { sse(res, { type: 'error', message: String(e.message || e) }); return res.end(); }
+      d.clients.add(res);
+      req.on('close', () => {
+        d.clients.delete(res);
+        if (!d.clients.size) { d.status = 'stopping'; d.interrupt = 'stop'; abortAll(d); }
+      });
+      try { await runDebate(d); }
+      catch (e) { d.emit({ type: 'error', message: String(e.message || e) }); }
+      finally { d.status = 'done'; debates.delete(d.id); cleanupDebate(d); res.end(); }
+      return;
     }
 
     // --- OpenAI-compatible: list models (provider + provider/modelId) ---
