@@ -152,6 +152,10 @@ function extractJson(s) {
   try { return JSON.parse(body.slice(a, b + 1)); } catch { return null; }
 }
 function clabel(id) { return (providerList().find((p) => p.id === id) || {}).label || id; }
+function failMsg(speaker, e) {
+  const r = (e && e.message) || String(e || '');
+  return `⚠ **${clabel(speaker)} 응답 실패** — 사용량 한도·인증·일시 오류 등으로 응답하지 못했습니다.${r ? `\n\n\`${r}\`` : ''}`;
+}
 
 let _turnSeq = 0;
 function newTurn(o) { return { id: 't' + (++_turnSeq), ts: Date.now(), text: '', ...o }; }
@@ -194,6 +198,7 @@ function cleanupDebate(d) {
 // a debater turn — streams deltas into turn.text live (so partials survive aborts)
 async function debaterTurn(d, turn, prompt) {
   const ac = makeAbort(d);
+  const t0 = Date.now();
   try {
     const r = await runAgent({
       provider: turn.speaker, model: turn.model, sessionId: null, workdir: d.workdir,
@@ -203,14 +208,23 @@ async function debaterTurn(d, turn, prompt) {
     });
     if (r.sessionId) d.createdSessions.push({ provider: turn.speaker, sessionId: r.sessionId });
     if (r.text) turn.text = r.text;
+    if (!turn.text.trim()) {  // agent finished but produced nothing (e.g. usage limit) — make it visible
+      turn.text = `⚠ **${clabel(turn.speaker)} 응답이 비어 있습니다** — 사용량 한도이거나 일시적 오류일 수 있어요.`;
+      turn.failed = true;
+      d.emit({ type: 'delta', turnId: turn.id, speaker: turn.speaker, text: turn.text });
+    }
+    log(`council ${turn.speaker}${turn.model ? '/' + turn.model : ''} ${turn.role || ''} ${Date.now() - t0}ms ${turn.text.length}c`);
     return turn.text;
   } finally { clearAbort(d, ac); }
 }
 
-// the moderator — also stateless; isolated from debaters by construction
+// the moderator — also stateless; isolated from debaters by construction.
+// emits moderating{active} so the UI can glow the moderator seat while it deliberates.
 async function moderate(d, instruction) {
   const ac = makeAbort(d);
+  const t0 = Date.now();
   let text = '';
+  d.emit({ type: 'moderating', active: true });
   try {
     const r = await runAgent({
       provider: d.moderator, sessionId: null, workdir: d.workdir,
@@ -218,7 +232,11 @@ async function moderate(d, instruction) {
     });
     if (r.sessionId) d.createdSessions.push({ provider: d.moderator, sessionId: r.sessionId });
     text = r.text || '';
-  } finally { clearAbort(d, ac); }
+  } finally {
+    clearAbort(d, ac);
+    d.emit({ type: 'moderating', active: false });
+    log(`council mod:${d.moderator} ${Date.now() - t0}ms ${text.length}c`);
+  }
   return text;
 }
 function moderatorSay(d, text) {
@@ -257,9 +275,9 @@ async function runDebate(d) {
     const turn = newTurn({ speaker: p.key, model: p.model, role: 'opening' });
     d.emit({ type: 'turn_start', turnId: turn.id, speaker: p.key, role: 'opening' });
     try { await debaterTurn(d, turn, `다음 질문에 당신의 의견을 분명하고 간결하게 답하세요. 입장을 명확히 하세요.\n\n[질문]\n${q}`); }
-    catch (e) { if (!turn.text) turn.text = `(오류: ${e.message})`; }
+    catch (e) { if (!turn.text && !d.interrupt) { turn.text = failMsg(turn.speaker, e); turn.failed = true; d.emit({ type: 'delta', turnId: turn.id, speaker: turn.speaker, text: turn.text }); } }
     d.transcript.push(turn);
-    d.emit({ type: 'turn_end', turnId: turn.id, interrupted: !!d.interrupt });
+    d.emit({ type: 'turn_end', turnId: turn.id, interrupted: !!d.interrupt, error: !!turn.failed });
   }));
 
   // ── Phase 1: moderator extracts the real disputes ──
@@ -316,7 +334,7 @@ async function runDebate(d) {
     try {
       await debaterTurn(d, turn, prompt);
       d.transcript.push(turn);
-      d.emit({ type: 'turn_end', turnId: turn.id });
+      d.emit({ type: 'turn_end', turnId: turn.id, error: !!turn.failed });
       turns++; errStreak = 0;
     } catch (e) {
       // user interrupt → keep partial, loop back to handle the interjection (does NOT consume a turn)
@@ -328,7 +346,7 @@ async function runDebate(d) {
       }
       if (d.status !== 'running') { d.emit({ type: 'turn_end', turnId: turn.id, interrupted: true }); break; }
       // genuine error/timeout → record, count the turn, bail if it keeps failing
-      if (!turn.text) turn.text = `(오류: ${e.message})`;
+      if (!turn.text) { turn.text = failMsg(turn.speaker, e); turn.failed = true; d.emit({ type: 'delta', turnId: turn.id, speaker: turn.speaker, text: turn.text }); }
       d.transcript.push(turn);
       d.emit({ type: 'turn_end', turnId: turn.id, error: true });
       turns++;
