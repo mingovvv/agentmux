@@ -1,5 +1,6 @@
 'use strict';
 const { spawn } = require('child_process');
+const { StringDecoder } = require('string_decoder');
 const fs = require('fs');
 const path = require('path');
 
@@ -42,8 +43,10 @@ function run({ prompt, sessionId, workdir, model, onEvent, signal }) {
 
     let out = '';
     let stderr = '';
+    const decoder = new StringDecoder('utf8'); // hold incomplete multi-byte chars across chunks
     child.stdout.on('data', (d) => {
-      const t = d.toString();
+      const t = decoder.write(d);
+      if (!t) return;
       out += t;
       onEvent({ type: 'delta', text: t });
     });
@@ -51,6 +54,8 @@ function run({ prompt, sessionId, workdir, model, onEvent, signal }) {
 
     child.on('error', reject);
     child.on('close', (code) => {
+      const tail = decoder.end();
+      if (tail) { out += tail; onEvent({ type: 'delta', text: tail }); }
       if (code !== 0) return reject(new Error(stderr.trim() || `agy exited with code ${code}`));
       const sid = sessionId || newestNewId(before) || null;
       resolve({ sessionId: sid, text: out.trim(), cost: 0 });

@@ -1,5 +1,6 @@
 'use strict';
 const { spawn } = require('child_process');
+const { StringDecoder } = require('string_decoder');
 const crypto = require('crypto');
 
 /**
@@ -48,8 +49,9 @@ function run({ prompt, sessionId, workdir, model, onEvent, signal }) {
     let cost = 0;
     let stderr = '';
 
+    const decoder = new StringDecoder('utf8'); // hold incomplete multi-byte chars across chunks
     child.stdout.on('data', (d) => {
-      buf += d.toString();
+      buf += decoder.write(d);
       let nl;
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl);
