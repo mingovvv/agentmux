@@ -313,7 +313,7 @@ async function runDebate(d) {
     // (b) moderator decides the next move
     let decRaw = '';
     try {
-      decRaw = await moderate(d, `당신은 토론 사회자입니다. 질문: "${q}"\n\n[쟁점]\n${(d.disputes || []).map((x) => `${x.id}. ${x.title}`).join('\n') || '(없음)'}\n\n[최근 토론]\n${compactTranscript(d)}${userNote}\n\n다음에 누가 누구에게 무엇을 말할지 정하세요. 한쪽으로 치우치지 말고 핑퐁이 되게 번갈아 지목하세요. 토론이 충분히 무르익었거나 합의/결렬이 분명하면 종료하세요. JSON으로만:\n{"action":"direct","say":"진행 멘트 한 줄(선택)","speaker":"${ids.join('|')}","target":"${ids.join('|')} 또는 빈값","disputeId":"쟁점번호 또는 빈값","instruction":"speaker에게 줄 구체적 지시"}\n또는\n{"action":"conclude","say":"마무리 멘트 한 줄"}`);
+      decRaw = await moderate(d, `당신은 토론 사회자입니다. 질문: "${q}"\n\n[쟁점]\n${(d.disputes || []).map((x) => `${x.id}. ${x.title}`).join('\n') || '(없음)'}\n\n[최근 토론]\n${compactTranscript(d)}${userNote}\n\n다음에 누가 누구에게 무엇을 말할지 정하세요. 한쪽으로 치우치지 말고 핑퐁이 되게 번갈아 지목하고, 한 쟁점에만 머물지 말고 아직 덜 다룬 쟁점으로도 균형 있게 옮겨가세요(disputeId를 가급적 명시). 토론이 충분히 무르익었거나 합의/결렬이 분명하면 종료하세요. JSON으로만:\n{"action":"direct","say":"진행 멘트 한 줄(선택)","speaker":"${ids.join('|')}","target":"${ids.join('|')} 또는 빈값","disputeId":"쟁점번호 또는 빈값","instruction":"speaker에게 줄 구체적 지시"}\n또는\n{"action":"conclude","say":"마무리 멘트 한 줄"}`);
     } catch {
       if (d.interrupt === 'user') continue;   // user jumped in while moderating
       if (d.status !== 'running') break;       // stopped / disconnected

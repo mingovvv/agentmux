@@ -170,8 +170,9 @@
   .wrap:has(.debate-msg){max-width:920px}
   .debate{position:relative}
   /* sticky stage: roster + disputes */
-  .stage{position:sticky;top:-26px;z-index:5;margin:-2px 0 20px;padding:15px 17px;border:1px solid var(--border);border-radius:18px;
-    background:linear-gradient(180deg,rgba(26,29,37,.94),rgba(15,17,21,.92));backdrop-filter:blur(10px);box-shadow:0 10px 30px rgba(0,0,0,.32)}
+  .stage{position:sticky;top:-26px;z-index:5;margin:-2px 0 22px;padding:17px 19px;border:1px solid #3c4456;border-radius:18px;
+    background:linear-gradient(180deg,#2b3142,#20242f);
+    box-shadow:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(109,139,255,.1),inset 0 1px 0 rgba(255,255,255,.05)}
   .stage-q{font-size:14px;font-weight:600;line-height:1.45;margin-bottom:13px;display:flex;gap:9px;align-items:flex-start}
   .stage-q .qmark{flex-shrink:0;width:21px;height:21px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-top:1px}
   .roster{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -192,7 +193,10 @@
   .dispute{font-size:11.5px;color:var(--muted);padding:5px 11px;border:1px solid var(--border);border-radius:9px;display:flex;gap:7px;align-items:center;transition:.2s;max-width:300px}
   .dispute .dn{color:var(--accent);font-weight:700;flex-shrink:0}
   .dispute .dt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dispute.active{border-color:var(--accent);color:var(--text);background:rgba(109,139,255,.1);box-shadow:0 0 14px rgba(109,139,255,.18)}
+  .dispute.visited{border-color:rgba(109,139,255,.34);color:var(--text)}
+  .dispute.visited .dn{color:var(--accent)}
+  .dispute.active{border-color:var(--accent);color:#fff;background:rgba(109,139,255,.15);animation:dispPulse 1.6s ease-in-out infinite}
+  @keyframes dispPulse{0%,100%{box-shadow:0 0 0 1px rgba(109,139,255,.5),0 0 9px rgba(109,139,255,.2)}50%{box-shadow:0 0 0 1px rgba(109,139,255,.85),0 0 20px rgba(109,139,255,.5)}}
   /* thread */
   .thread{display:flex;flex-direction:column;gap:17px}
   .sp{display:flex;gap:12px;animation:fade .25s}
@@ -216,7 +220,9 @@
   .sp.failed .av{filter:grayscale(.4);opacity:.75}
   /* moderator stage-direction line */
   .mod-line{display:flex;align-items:flex-start;gap:12px;margin:1px 0;animation:fade .25s}
-  .mod-line .ml-ic{flex-shrink:0;width:31px;height:31px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1px dashed var(--border);font-size:14px}
+  .mod-line .ml-ic{flex-shrink:0;width:31px;height:31px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1px dashed #4a4170;font-size:13px;color:var(--accent2)}
+  .mod-line .ml-ic .cicon{width:19px;height:19px}
+  .mod-line.mod-think .ml-tx{display:none}
   .mod-line .ml-body{flex:1;min-width:0}
   .mod-line .ml-tx{font-size:12.5px;color:#9aa0ac;font-style:italic;line-height:1.55;padding-top:6px}
   .mod-line .ml-tx strong,.mod-line .ml-tx b{color:#c2c9d6;font-style:normal}
@@ -325,7 +331,7 @@ function reflectUI(){
   ctog.classList.toggle('on',councilMode);
   if(debateLive){
     ctog.style.display='none'; dd.style.display='none'; stop.style.display='flex';
-    input.placeholder='끼어들어 좌장으로 발언하세요…  (Enter 전송)';
+    input.placeholder='토론에 끼어들어 말하기…  (Enter 전송)';
   }else{
     ctog.style.display=''; dd.style.display=''; stop.style.display='none';
     dd.style.opacity='1'; dd.style.pointerEvents='auto';
@@ -388,18 +394,30 @@ async function sendCouncil(){
     const sep=document.createElement('span'); sep.className='seat-sep'; roster.appendChild(sep);
     phasePill=document.createElement('span'); phasePill.className='phase-pill busy'; phasePill.textContent='개회'; roster.appendChild(phasePill);
   }
-  function lightSeat(k){ for(const id in seats) seats[id].classList.toggle('live', id===k); }
-  function clearLight(){ for(const id in seats) seats[id].classList.remove('live'); }
+  // seats glow by refcount so several can be lit at once (e.g. all 3 in the opening)
+  const seatCount={}; let moderatorId='', curPhase='';
+  function seatOn(k){ if(!k) return; seatCount[k]=(seatCount[k]||0)+1; if(seats[k]) seats[k].classList.add('live'); }
+  function seatOff(k){ if(!k) return; seatCount[k]=Math.max(0,(seatCount[k]||0)-1); if(!seatCount[k]&&seats[k]) seats[k].classList.remove('live'); }
+  function clearLight(){ for(const k in seatCount) seatCount[k]=0; for(const id in seats) seats[id].classList.remove('live'); }
+  function modIcon(){ return moderatorId?`<span class="cicon ${esc(moderatorId)}">${providerIcon(moderatorId)}</span>`:'◆'; }
+  // a thread placeholder while the moderator deliberates (so the thread isn't empty during the gap)
+  let modThinkEl=null;
+  function showModThinking(){ if(modThinkEl||curPhase==='closing') return;
+    modThinkEl=document.createElement('div'); modThinkEl.className='mod-line live mod-think';
+    modThinkEl.innerHTML=`<div class="ml-ic mod-ic">${modIcon()}</div><div class="ml-body"><div class="ml-tx"></div>${liveDot('사회자가 다음 진행을 검토하는 중')}</div>`;
+    thread.appendChild(modThinkEl); scroll(); }
+  function clearModThinking(){ if(modThinkEl){ modThinkEl.remove(); modThinkEl=null; } }
   function renderDisputes(items){
     if(!items||!items.length){ disputesEl.style.display='none'; return; }
     disputesEl.style.display='flex'; disputesEl.innerHTML='';
     for(const it of items){ const d=document.createElement('span'); d.className='dispute'; d.dataset.id=it.id;
       d.innerHTML=`<span class="dn">${esc(String(it.id))}</span><span class="dt" title="${esc(it.detail||'')}">${esc(it.title||'')}</span>`; disputesEl.appendChild(d); }
   }
-  function activeDispute(id){ disputesEl.querySelectorAll('.dispute').forEach(d=>d.classList.toggle('active', id&&d.dataset.id===String(id))); }
+  // current dispute pulses (active); any dispute touched stays marked (visited) so progress shows across all 3
+  function activeDispute(id){ disputesEl.querySelectorAll('.dispute').forEach(d=>{ const on=id&&d.dataset.id===String(id); d.classList.toggle('active',on); if(on) d.classList.add('visited'); }); }
   function startAgentTurn(ev){
-    lightSeat(ev.speaker); activeDispute(ev.disputeId);
-    const sp=document.createElement('div'); sp.className='sp live'; sp.dataset.t=ev.turnId;
+    clearModThinking(); seatOn(ev.speaker); activeDispute(ev.disputeId);
+    const sp=document.createElement('div'); sp.className='sp live'; sp.dataset.t=ev.turnId; sp.dataset.k=ev.speaker;
     const tags=(ev.target?`<span class="tag vs">→ ${esc(labelOf(ev.target))}</span>`:'')
               +(ev.disputeId?`<span class="tag disp">쟁점 ${esc(String(ev.disputeId))}</span>`:'');
     sp.innerHTML=`<div class="av ${esc(ev.speaker)}">${providerIcon(ev.speaker)}</div>
@@ -408,21 +426,22 @@ async function sendCouncil(){
     thread.appendChild(sp); bubbles[ev.turnId]=sp; blocks[ev.turnId]={el:sp.querySelector('.content'),target:'',shown:0}; scroll();
   }
   function startModTurn(ev){
-    lightSeat('__moderator');
-    const ml=document.createElement('div'); ml.className='mod-line live'; ml.dataset.t=ev.turnId;
-    ml.innerHTML=`<div class="ml-ic">🎙</div><div class="ml-body"><div class="ml-tx"></div>${liveDot('진행 정리 중')}</div>`;
+    clearModThinking(); seatOn('__moderator');
+    const ml=document.createElement('div'); ml.className='mod-line live'; ml.dataset.t=ev.turnId; ml.dataset.k='__moderator';
+    ml.innerHTML=`<div class="ml-ic mod-ic">${modIcon()}</div><div class="ml-body"><div class="ml-tx"></div>${liveDot('진행 멘트 작성 중')}</div>`;
     thread.appendChild(ml); bubbles[ev.turnId]=ml; blocks[ev.turnId]={el:ml.querySelector('.ml-tx'),target:'',shown:0}; scroll();
   }
   let pendingEl=null;
   function showPending(label){ if(pendingEl) return; pendingEl=document.createElement('div'); pendingEl.className='cons-pending'; pendingEl.innerHTML=`<span class="spin"></span><span class="glabel">${esc(label)}</span>`; consWrap.appendChild(pendingEl); scroll(); }
   function clearPending(){ if(pendingEl){ pendingEl.remove(); pendingEl=null; } }
   function renderUser(text){
+    clearModThinking();
     const sp=document.createElement('div'); sp.className='sp chair';
-    sp.innerHTML=`<div class="av">나</div><div class="sp-main"><div class="sp-hd"><span class="sp-name">좌장 (나)</span></div><div class="sp-card"><div class="content">${md(text)}</div></div></div>`;
+    sp.innerHTML=`<div class="av">나</div><div class="sp-main"><div class="sp-hd"><span class="sp-name">나의 개입</span></div><div class="sp-card"><div class="content">${md(text)}</div></div></div>`;
     thread.appendChild(sp); scroll();
   }
   function renderConsensus(ev){
-    clearPending(); activeDispute(null); lightSeat('__moderator'); // moderator delivers the verdict → keep it glowing
+    clearPending(); clearModThinking(); activeDispute(null); seatOn('__moderator'); // moderator delivers the verdict → keep it glowing
     const c=document.createElement('div'); c.className='consensus';
     let pts='';
     if(ev.points&&ev.points.length){ pts='<div class="cons-points">'+ev.points.map(p=>{
@@ -441,17 +460,17 @@ async function sendCouncil(){
       buf+=dec.decode(value,{stream:true});
       let i; while((i=buf.indexOf('\n\n'))>=0){ const chunk=buf.slice(0,i); buf=buf.slice(i+2); const line=chunk.replace(/^data: /,''); if(!line) continue;
         let ev; try{ev=JSON.parse(line);}catch{continue;}
-        if(ev.type==='debate'){ debateId=ev.debateId; debateLive=true; reflectUI(); buildRoster(ev.participants, ev.moderator); }
-        else if(ev.type==='phase'){ if(phasePill){ phasePill.textContent=ev.label||''; phasePill.classList.add('busy'); } if(ev.phase==='closing') showPending('결론을 정리하는 중…'); }
-        else if(ev.type==='moderating'){ if(ev.active) lightSeat('__moderator'); }
+        if(ev.type==='debate'){ debateId=ev.debateId; debateLive=true; moderatorId=ev.moderator; reflectUI(); buildRoster(ev.participants, ev.moderator); }
+        else if(ev.type==='phase'){ curPhase=ev.phase; if(phasePill){ phasePill.textContent=ev.label||''; phasePill.classList.add('busy'); } if(ev.phase==='closing') showPending('결론을 정리하는 중…'); }
+        else if(ev.type==='moderating'){ if(ev.active){ seatOn('__moderator'); showModThinking(); } else { seatOff('__moderator'); clearModThinking(); } }
         else if(ev.type==='disputes'){ renderDisputes(ev.items); }
         else if(ev.type==='turn_start'){ if(ev.speaker==='__moderator') startModTurn(ev); else startAgentTurn(ev); }
         else if(ev.type==='delta'){ const b=blocks[ev.turnId]; if(b){ b.target+=ev.text; pump(); } }
-        else if(ev.type==='turn_end'){ const sp=bubbles[ev.turnId]; if(sp){ sp.classList.remove('live'); if(ev.interrupted) sp.classList.add('cut'); if(ev.error) sp.classList.add('failed'); } }
+        else if(ev.type==='turn_end'){ const sp=bubbles[ev.turnId]; if(sp){ sp.classList.remove('live'); seatOff(sp.dataset.k); if(ev.interrupted) sp.classList.add('cut'); if(ev.error) sp.classList.add('failed'); } }
         else if(ev.type==='user'){ renderUser(ev.text); }
         else if(ev.type==='consensus'){ renderConsensus(ev); }
         else if(ev.type==='error'){ errMsg=ev.message; }
-        else if(ev.type==='done'){ clearLight(); clearPending(); if(phasePill){ phasePill.textContent='토론 종료'; phasePill.classList.remove('busy'); } }
+        else if(ev.type==='done'){ clearLight(); clearPending(); clearModThinking(); if(phasePill){ phasePill.textContent='토론 종료'; phasePill.classList.remove('busy'); } }
       }
     }
   }catch(e){ if(!(e.name==='AbortError'||(curCtrl&&curCtrl.signal.aborted))) errMsg=String(e); }
@@ -546,7 +565,7 @@ function renderEmpty(){
   $('#main').classList.add('welcome');
   $('#main').classList.toggle('council-welcome', councilMode);
   $('#hero').innerHTML = councilMode
-    ? '🗣 토론 모드<span class="hero-sub">질문을 던지면 3개의 AI가 각자 답하고, 사회자의 진행 아래 서로 지목해 반박합니다. 도중 언제든 끼어들어 좌장으로 흐름을 바꿀 수 있어요.<br><br>입력창 오른쪽 드롭다운에서 <b>사회자</b>를 직접 고르세요 — 사회자가 쟁점을 잡고, 누가 누구에게 반박할지 지목하며, 마지막에 결론을 종합합니다.</span>'
+    ? '🗣 토론 모드<span class="hero-sub">질문을 던지면 3개의 AI가 각자 답하고, 사회자의 진행 아래 서로 지목해 반박합니다. 도중 언제든 끼어들어 토론의 흐름을 바꿀 수 있어요.<br><br>입력창 오른쪽 드롭다운에서 <b>사회자</b>를 직접 고르세요 — 사회자가 쟁점을 잡고, 누가 누구에게 반박할지 지목하며, 마지막에 결론을 종합합니다.</span>'
     : '무엇을 도와드릴까요?';
   $('#chat').innerHTML='<div class="empty"></div>';
 }
