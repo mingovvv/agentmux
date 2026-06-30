@@ -136,6 +136,7 @@
   .dd-btn .chev{color:var(--muted);font-size:9px;transition:transform .15s}
   .dd.open .dd-btn .chev{transform:rotate(180deg)}
   .dd-val{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  .dd-cap{font-size:10.5px;color:var(--muted);letter-spacing:.2px;padding-right:7px;margin-right:1px;border-right:1px solid var(--border)}
   .dd-menu{position:absolute;bottom:calc(100% + 8px);left:0;min-width:200px;background:var(--panel2);border:1px solid var(--border);
     border-radius:14px;padding:5px;box-shadow:0 14px 36px rgba(0,0,0,.55);opacity:0;visibility:hidden;transform:translateY(6px);
     transition:.14s;z-index:50;max-height:min(58vh,440px);overflow-y:auto}
@@ -229,6 +230,27 @@
   .cpoint.split .cflag{background:rgba(255,107,107,.14);color:#ff9a9a}
   .cpoint .cpt{color:var(--text)}
   .cpoint .cpd{color:var(--muted);display:block;margin-top:3px;line-height:1.5}
+  /* ===== generating indicators ===== */
+  .gen{display:inline-flex;align-items:center;gap:10px;padding:3px 0;font-size:12.5px}
+  .gen .dots{display:inline-flex;gap:5px}
+  .gen .dots i{width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));animation:bob 1.05s ease-in-out infinite}
+  .gen .dots i:nth-child(2){animation-delay:.14s}
+  .gen .dots i:nth-child(3){animation-delay:.28s}
+  @keyframes bob{0%,100%{transform:translateY(0);opacity:.32}50%{transform:translateY(-5px);opacity:1}}
+  .glabel{background:linear-gradient(90deg,#7a8090 0%,#eef1f7 50%,#7a8090 100%);background-size:200% 100%;
+    -webkit-background-clip:text;background-clip:text;color:transparent;animation:shimmer 1.9s linear infinite}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  .spin{width:16px;height:16px;border-radius:50%;flex-shrink:0;
+    background:conic-gradient(from 0deg,transparent 0%,var(--accent) 72%,var(--accent2) 100%);
+    -webkit-mask:radial-gradient(farthest-side,#0000 calc(100% - 2.5px),#000 0);mask:radial-gradient(farthest-side,#0000 calc(100% - 2.5px),#000 0);
+    animation:spin .72s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .cons-pending{display:flex;align-items:center;gap:12px;margin-top:24px;padding:16px 18px;border:1px solid var(--border);border-radius:17px;font-size:13px;
+    background:linear-gradient(180deg,rgba(109,139,255,.09),transparent)}
+  .phase-pill.busy{color:var(--accent);border-color:rgba(109,139,255,.42)}
+  .phase-pill.busy::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);
+    margin-right:7px;vertical-align:1px;box-shadow:0 0 8px var(--accent);animation:pulse2 1.2s ease-in-out infinite}
+  @keyframes pulse2{50%{opacity:.28}}
   /* council welcome */
   .hero-sub{display:block;font-size:13px;font-weight:400;color:var(--muted);margin-top:10px;line-height:1.6;max-width:560px;margin-left:auto;margin-right:auto}
   main.council-welcome .inputbox{border-color:#3a3f6b;box-shadow:0 0 26px rgba(109,139,255,.16)}
@@ -275,7 +297,7 @@
 <script>
 const $ = (s)=>document.querySelector(s);
 let TOKEN = localStorage.getItem('gw_token') || '';
-let convId = null, busy = false, providers = [], curProvider = '', curModel = '', curCtrl = null, councilMode = false;
+let convId = null, busy = false, providers = [], curProvider = '', curModel = '', curCtrl = null, councilMode = false, curModerator = '';
 let debateLive=false, debateId=null;
 function onSend(){
   if(debateLive){ sendInterjection(); return; }
@@ -292,10 +314,12 @@ function reflectUI(){
     input.placeholder='끼어들어 좌장으로 발언하세요…  (Enter 전송)';
   }else{
     ctog.style.display=''; dd.style.display=''; stop.style.display='none';
-    dd.style.opacity=councilMode?'.4':'1'; dd.style.pointerEvents=councilMode?'none':'auto';
+    dd.style.opacity='1'; dd.style.pointerEvents='auto';
     input.placeholder=councilMode?'질문하면 3개 AI가 토론을 시작합니다…  (Enter 전송)':'메시지를 입력하세요…  (Enter 전송, Shift+Enter 줄바꿈)';
+    renderComposerDD();
   }
 }
+function renderComposerDD(){ if(councilMode) buildModeratorDD(); else buildCombo(); }
 function toggleCouncil(){ if(debateLive) return; councilMode=!councilMode; reflectUI(); if($('#main').classList.contains('welcome')) renderEmpty(); }
 function newCouncil(){ leaveLive(); convId=null; councilMode=true; reflectUI(); renderEmpty(); loadConvs(); $('#input').focus(); }
 function stopDebate(){ if(debateId) fetch('/api/council/'+debateId+'/stop',{method:'POST',headers:H()}).catch(()=>{}); }
@@ -360,21 +384,24 @@ async function sendCouncil(){
     sp.innerHTML=`<div class="av ${esc(ev.speaker)}">${providerIcon(ev.speaker)}</div>
       <div class="sp-main"><div class="sp-hd"><span class="sp-name">${esc(labelOf(ev.speaker))}</span>${tags}</div>
       <div class="sp-card"><div class="content"></div></div></div>`;
-    thread.appendChild(sp); bubbles[ev.turnId]=sp; blocks[ev.turnId]={el:sp.querySelector('.content'),target:'',shown:0}; scroll();
+    thread.appendChild(sp); bubbles[ev.turnId]=sp; const c=sp.querySelector('.content'); c.innerHTML=genHTML('생각하는 중'); blocks[ev.turnId]={el:c,target:'',shown:0}; scroll();
   }
   function startModTurn(ev){
     clearLight(); if(seats['__moderator']) seats['__moderator'].classList.add('live');
     const ml=document.createElement('div'); ml.className='mod-line'; ml.dataset.t=ev.turnId;
     ml.innerHTML=`<div class="ml-ic">🎙</div><div class="ml-tx"></div>`;
-    thread.appendChild(ml); bubbles[ev.turnId]=ml; blocks[ev.turnId]={el:ml.querySelector('.ml-tx'),target:'',shown:0}; scroll();
+    thread.appendChild(ml); bubbles[ev.turnId]=ml; const tx=ml.querySelector('.ml-tx'); tx.innerHTML=genHTML('진행 정리 중'); blocks[ev.turnId]={el:tx,target:'',shown:0}; scroll();
   }
+  let pendingEl=null;
+  function showPending(label){ if(pendingEl) return; pendingEl=document.createElement('div'); pendingEl.className='cons-pending'; pendingEl.innerHTML=`<span class="spin"></span><span class="glabel">${esc(label)}</span>`; consWrap.appendChild(pendingEl); scroll(); }
+  function clearPending(){ if(pendingEl){ pendingEl.remove(); pendingEl=null; } }
   function renderUser(text){
     const sp=document.createElement('div'); sp.className='sp chair';
     sp.innerHTML=`<div class="av">나</div><div class="sp-main"><div class="sp-hd"><span class="sp-name">좌장 (나)</span></div><div class="sp-card"><div class="content">${md(text)}</div></div></div>`;
     thread.appendChild(sp); scroll();
   }
   function renderConsensus(ev){
-    clearLight(); activeDispute(null);
+    clearLight(); clearPending(); activeDispute(null);
     const c=document.createElement('div'); c.className='consensus';
     let pts='';
     if(ev.points&&ev.points.length){ pts='<div class="cons-points">'+ev.points.map(p=>{
@@ -387,26 +414,26 @@ async function sendCouncil(){
   let errMsg=null;
   busy=true; curCtrl=new AbortController();
   try{
-    const r=await fetch('/api/council',{method:'POST',headers:H(),signal:curCtrl.signal,body:JSON.stringify({question:text})});
+    const r=await fetch('/api/council',{method:'POST',headers:H(),signal:curCtrl.signal,body:JSON.stringify({question:text, moderator:curModerator||undefined})});
     const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
     while(true){ const {value,done}=await reader.read(); if(done) break;
       buf+=dec.decode(value,{stream:true});
       let i; while((i=buf.indexOf('\n\n'))>=0){ const chunk=buf.slice(0,i); buf=buf.slice(i+2); const line=chunk.replace(/^data: /,''); if(!line) continue;
         let ev; try{ev=JSON.parse(line);}catch{continue;}
         if(ev.type==='debate'){ debateId=ev.debateId; debateLive=true; reflectUI(); buildRoster(ev.participants, ev.moderator); }
-        else if(ev.type==='phase'){ if(phasePill) phasePill.textContent=ev.label||''; }
+        else if(ev.type==='phase'){ if(phasePill){ phasePill.textContent=ev.label||''; phasePill.classList.add('busy'); } if(ev.phase==='closing') showPending('결론을 정리하는 중…'); }
         else if(ev.type==='disputes'){ renderDisputes(ev.items); }
         else if(ev.type==='turn_start'){ if(ev.speaker==='__moderator') startModTurn(ev); else startAgentTurn(ev); }
         else if(ev.type==='delta'){ const b=blocks[ev.turnId]; if(b){ b.target+=ev.text; pump(); } }
-        else if(ev.type==='turn_end'){ const sp=bubbles[ev.turnId]; if(sp){ sp.classList.remove('live'); if(ev.interrupted) sp.classList.add('cut'); } }
+        else if(ev.type==='turn_end'){ const sp=bubbles[ev.turnId]; if(sp){ sp.classList.remove('live'); if(ev.interrupted) sp.classList.add('cut'); } const b=blocks[ev.turnId]; if(b && !b.target) b.el.innerHTML=''; }
         else if(ev.type==='user'){ renderUser(ev.text); }
         else if(ev.type==='consensus'){ renderConsensus(ev); }
         else if(ev.type==='error'){ errMsg=ev.message; }
-        else if(ev.type==='done'){ clearLight(); if(phasePill) phasePill.textContent='토론 종료'; }
+        else if(ev.type==='done'){ clearLight(); clearPending(); if(phasePill){ phasePill.textContent='토론 종료'; phasePill.classList.remove('busy'); } }
       }
     }
   }catch(e){ if(!(e.name==='AbortError'||(curCtrl&&curCtrl.signal.aborted))) errMsg=String(e); }
-  clearLight();
+  clearLight(); clearPending();
   if(errMsg){ const er=document.createElement('div'); er.className='err'; er.textContent='⚠ '+errMsg; consWrap.appendChild(er); }
   debateLive=false; debateId=null; busy=false; curCtrl=null; reflectUI();
 }
@@ -426,7 +453,9 @@ async function boot(){
     const first = providers.find(p=>p.enabled) || providers[0];
     curProvider = first ? first.id : '';
     curModel = firstModelOf(curProvider);
-    buildCombo();
+    const enabled = providers.filter(p=>p.enabled);
+    curModerator = ((enabled.find(p=>p.id==='claude'))||enabled[0]||{}).id||'';
+    renderComposerDD();
     loadConvs();
   }catch(e){ /* offline */ }
 }
@@ -456,6 +485,19 @@ function buildCombo(){
       }
     };
   });
+}
+function buildModeratorDD(){
+  const el=$('#ddCombo');
+  const enabled=providers.filter(p=>p.enabled);
+  if(!curModerator || !enabled.find(p=>p.id===curModerator)) curModerator=((enabled.find(p=>p.id==='claude'))||enabled[0]||{}).id||'';
+  const m=providers.find(p=>p.id===curModerator)||{};
+  el.innerHTML = `<button class="dd-btn" type="button" title="토론을 진행할 사회자"><span class="dd-cap">🎙 사회자</span><span class="cicon ${esc(curModerator)}">${providerIcon(curModerator)}</span><span class="dd-val">${esc(m.label||'—')}</span><span class="chev">▼</span></button>`
+    + `<div class="dd-menu"><div class="dd-lbl">사회자 · 토론 진행 (지목·종합)</div>`
+    + providers.map(x=>`<div class="dd-item${x.id===curModerator?' sel':''}${x.enabled?'':' dis'}" data-v="${esc(x.id)}"><span style="display:flex;align-items:center;gap:8px"><span class="cicon ${esc(x.id)}">${providerIcon(x.id)}</span>${esc(x.label)}${x.enabled?'':' <span class="muted">준비중</span>'}</span></div>`).join('')
+    + `</div>`;
+  el.querySelector('.dd-btn').onclick=(e)=>{ e.stopPropagation(); const open=el.classList.contains('open'); closeAllDD(); if(!open) el.classList.add('open'); };
+  el.querySelectorAll('.dd-item').forEach(it=>{ if(it.classList.contains('dis')) return;
+    it.onclick=(e)=>{ e.stopPropagation(); curModerator=it.getAttribute('data-v'); buildModeratorDD(); el.classList.remove('open'); }; });
 }
 function closeAllDD(){ document.querySelectorAll('.dd.open').forEach(d=>d.classList.remove('open')); }
 document.addEventListener('click',closeAllDD);
@@ -510,6 +552,7 @@ function providerIcon(id){
 }
 marked.setOptions({ gfm:true, breaks:true });
 function md(s){ try{ return DOMPurify.sanitize(marked.parse(s||'')); }catch(e){ return esc(s); } }
+function genHTML(label){ return `<span class="gen"><span class="dots"><i></i><i></i><i></i></span><span class="glabel">${esc(label)}</span></span>`; }
 
 function toolSummary(name, input){
   input=input||{};
